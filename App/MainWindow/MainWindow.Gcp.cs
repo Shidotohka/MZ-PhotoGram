@@ -22,20 +22,12 @@ public partial class MainWindow
 {
     // ---------- M3 控制点与刺点 ----------
 
-    /// <summary>点表里框标的一行。</summary>
-    private sealed class FiducialRow
-    {
-        public int FiducialId { get; init; }
-        public string Id { get; init; } = "";
-        public string X { get; init; } = "";
-        public string Y { get; init; } = "";
-        public string Direction { get; init; } = "";
-        public string PixelI { get; init; } = "";
-        public string PixelJ { get; init; } = "";
-        public string Note { get; init; } = "";
-    }
-
-    /// <summary>点表里控制点的一行。只读展示，数值按固定小数格式化好再交给 DataGrid。</summary>
+    /// <summary>
+    /// 点表里控制点的一行。只读展示，数值按固定小数格式化好再交给 DataGrid。
+    ///
+    /// 格式串住在这里而不是刷新方法里：行对象是这张表唯一的"显示格式"所有者，
+    /// 以后加一列、改小数位，只改这一个文件。
+    /// </summary>
     private sealed class GcpRow
     {
         public Gcp? Source { get; init; }
@@ -49,6 +41,37 @@ public partial class MainWindow
         public string Pixel { get; init; } = "";
         public string Residual { get; init; } = "";
         public string Note { get; init; } = "";
+
+        /// <summary>
+        /// 造一行。
+        /// </summary>
+        /// <param name="gcp">控制点本身。</param>
+        /// <param name="here">本影像上的同名像点，没刺点时为 null。</param>
+        /// <param name="copies">有几张影像刺了这个点，用于提示"共 N 片有观测"。</param>
+        /// <param name="hasImage">当前是否载入了影像，用来区分「未载入影像」和「本片未刺点」。</param>
+        public static GcpRow From(Gcp gcp, ImagePoint? here, int copies, bool hasImage) => new()
+        {
+            Source = gcp,
+            Id = gcp.Id,
+            X = gcp.X.ToString("F3", CultureInfo.InvariantCulture),
+            Y = gcp.Y.ToString("F3", CultureInfo.InvariantCulture),
+            Z = gcp.Z.ToString("F3", CultureInfo.InvariantCulture),
+            Type = gcp.Type switch
+            {
+                GcpType.CheckPoint => "检查点",
+                GcpType.Elevation => "高程点",
+                _ => "控制点"
+            },
+            Xmm = here is null ? "—" : here.PositionMm.X.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
+            Ymm = here is null ? "—" : here.PositionMm.Y.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
+            Pixel = here is null ? "—" : $"{here.PixelX}, {here.PixelY}",
+            Residual = here?.ResidualMm is { } r
+                ? r.ToString("0.0000", CultureInfo.InvariantCulture)
+                : "",
+            Note = here is null
+                ? (hasImage ? "本片未刺点" : "未载入影像")
+                : (copies > 1 ? $"共 {copies} 片有观测" : ""),
+        };
     }
 
     /// <summary>量测表里选中的控制点号。非 null 时左键点影像就是在给它刺点。</summary>
@@ -159,6 +182,24 @@ public partial class MainWindow
         else RefreshGcpTable();
     }
 
+    /// <summary>
+    /// 重填一张点表：换数据源，再按条件恢复选中行。
+    ///
+    /// 两张点表（框标 / 控制点）的行类型不同，但这四步完全一样：判空、换源、写摘要、恢复选中。
+    /// 摘要文案各表不同，留在调用方；这里只管最机械的两步。
+    /// </summary>
+    /// <param name="isKept">
+    /// 判断某行是不是要恢复选中的那一行。调用方传进来的必须是<b>局部快照</b>：
+    /// 换 <paramref name="grid"/>.ItemsSource 会触发 SelectionChanged，现读字段会踩到新的选中状态。
+    /// </param>
+    private static void RefillTable<TRow>(DataGrid grid, IReadOnlyList<TRow> rows, Func<TRow, bool> isKept)
+        where TRow : class
+    {
+        grid.ItemsSource = rows;
+
+        if (rows.FirstOrDefault(isKept) is { } again) grid.SelectedItem = again;
+    }
+
     /// <summary>重建后方交会的控制点表。</summary>
     private void RefreshGcpTable()
     {
@@ -167,38 +208,15 @@ public partial class MainWindow
         var image = CurrentImage;
         var keep = _activeGcpId;
 
-        var rows = new List<GcpRow>(_project.Gcps.Count);
-        foreach (var gcp in _project.Gcps)
-        {
-            var here = image?.FindGcpPoint(gcp.Id);
-            var everywhere = _project.Images.Count(i => i.FindGcpPoint(gcp.Id) is not null);
+        var rows = _project.Gcps
+            .Select(gcp => GcpRow.From(
+                gcp,
+                image?.FindGcpPoint(gcp.Id),
+                _project.Images.Count(i => i.FindGcpPoint(gcp.Id) is not null),
+                image is not null))
+            .ToList();
 
-            rows.Add(new GcpRow
-            {
-                Source = gcp,
-                Id = gcp.Id,
-                X = gcp.X.ToString("F3", CultureInfo.InvariantCulture),
-                Y = gcp.Y.ToString("F3", CultureInfo.InvariantCulture),
-                Z = gcp.Z.ToString("F3", CultureInfo.InvariantCulture),
-                Type = gcp.Type switch
-                {
-                    GcpType.CheckPoint => "检查点",
-                    GcpType.Elevation => "高程点",
-                    _ => "控制点"
-                },
-                Xmm = here is null ? "—" : here.PositionMm.X.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
-                Ymm = here is null ? "—" : here.PositionMm.Y.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
-                Pixel = here is null ? "—" : $"{here.PixelX}, {here.PixelY}",
-                Residual = here?.ResidualMm is { } r
-                    ? r.ToString("0.0000", CultureInfo.InvariantCulture)
-                    : "",
-                Note = here is null
-                    ? (image is null ? "未载入影像" : "本片未刺点")
-                    : (everywhere > 1 ? $"共 {everywhere} 片有观测" : ""),
-            });
-        }
-
-        GcpGrid.ItemsSource = rows;
+        RefillTable(GcpGrid, rows, r => r.Id == keep);
 
         var bound = image?.BoundGcpCount ?? 0;
         MeasureSummary.Text = _project.Gcps.Count == 0
@@ -209,10 +227,6 @@ public partial class MainWindow
                   : "")
               + $"　本片已刺 {bound} 个"
               + (image?.Interior is null ? "　当前影像还没有内定向结果" : "");
-
-        if (keep is not null && rows.FirstOrDefault(r => r.Id == keep) is { } again)
-            GcpGrid.SelectedItem = again;
-
     }
 
     private void GcpGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)

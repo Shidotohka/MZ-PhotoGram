@@ -19,8 +19,8 @@ src/
 │   └── MainWindow/                五区骨架，按职责拆成 8 个 partial
 │       ├── MainWindow.xaml          界面骨架（StartupUri 指向这里）
 │       ├── MainWindow.xaml.cs       392 行　外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
-│       ├── MainWindow.Interior.cs   520 行　内定向
-│       ├── MainWindow.Gcp.cs        500 行　控制点、刺点、放大影像
+│       ├── MainWindow.Interior.cs   542 行　内定向（含框标表的行类型）
+│       ├── MainWindow.Gcp.cs        514 行　控制点、刺点、放大影像
 │       ├── MainWindow.Tree.cs       202 行　数据树
 │       ├── MainWindow.Resection.cs  161 行　后方交会（流程在 Core/Tasks，这里只剩显示）
 │       ├── MainWindow.Library.cs    155 行　影像库

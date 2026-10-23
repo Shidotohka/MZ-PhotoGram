@@ -370,6 +370,43 @@ public partial class MainWindow
     }
 
     /// <summary>
+    /// 点表里框标的一行。格式串住在这里，刷新方法里不出现小数位。
+    ///
+    /// 原来这个类放在 MainWindow.Gcp.cs 里（框标表的行定义住在控制点文件里），第 4 步归位。
+    /// </summary>
+    private sealed class FiducialRow
+    {
+        public int FiducialId { get; init; }
+        public string Id { get; init; } = "";
+        public string X { get; init; } = "";
+        public string Y { get; init; } = "";
+        public string Direction { get; init; } = "";
+        public string PixelI { get; init; } = "";
+        public string PixelJ { get; init; } = "";
+        public string Note { get; init; } = "";
+
+        /// <summary>
+        /// 造一行。
+        /// </summary>
+        /// <param name="id">框标号，同时是这张表的主键。</param>
+        /// <param name="xmm">框标在像平面上的坐标，mm（来自相机检校）。</param>
+        /// <param name="ymm">同上，y。</param>
+        /// <param name="mark">本影像上这个框标的量测，没测时为 null。</param>
+        /// <param name="showWhere">框标大致关于像主点对称时才写方位，否则方位描述会误导。</param>
+        public static FiducialRow From(int id, double xmm, double ymm, FiducialMark? mark, bool showWhere) => new()
+        {
+            FiducialId = id,
+            Id = id.ToString(CultureInfo.InvariantCulture),
+            X = xmm.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
+            Y = ymm.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
+            Direction = showWhere ? FiducialHelper.Describe(xmm, ymm) : "",
+            PixelI = mark is null ? "—" : mark.I.ToString("0.0", CultureInfo.InvariantCulture),
+            PixelJ = mark is null ? "—" : mark.J.ToString("0.0", CultureInfo.InvariantCulture),
+            Note = mark is null ? "未测" : "已测"
+        };
+    }
+
+    /// <summary>
     /// 内定向的点表：框标一行一个，标出像平面坐标与方位。
     /// 影像上的 8 个十字长得一样，光说「请点框标 1」没人知道是哪一个，
     /// 所以每行都给出方位（右下角 / 上边中点 …）；点某一行即把它设为待测框标。
@@ -384,36 +421,21 @@ public partial class MainWindow
         // 框标不关于像主点对称时，方位描述会误导，只显示坐标
         var showWhere = _camera is not null && FiducialHelper.IsRoughlySymmetric(_camera.Fiducials);
 
-        var rows = new List<FiducialRow>();
-        if (_camera is not null)
-        {
-            foreach (var fiducial in _camera.Fiducials)
-            {
-                var mark = image?.FiducialMarks.FirstOrDefault(m => m.FiducialId == fiducial.Id);
-                rows.Add(new FiducialRow
-                {
-                    FiducialId = fiducial.Id,
-                    Id = fiducial.Id.ToString(CultureInfo.InvariantCulture),
-                    X = fiducial.Xmm.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
-                    Y = fiducial.Ymm.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
-                    Direction = showWhere ? FiducialHelper.Describe(fiducial.Xmm, fiducial.Ymm) : "",
-                    PixelI = mark is null ? "—" : mark.I.ToString("0.0", CultureInfo.InvariantCulture),
-                    PixelJ = mark is null ? "—" : mark.J.ToString("0.0", CultureInfo.InvariantCulture),
-                    Note = mark is null ? "未测" : "已测"
-                });
-            }
-        }
+        var rows = _camera is null
+            ? new List<FiducialRow>()
+            : _camera.Fiducials
+                .Select(f => FiducialRow.From(
+                    f.Id, f.Xmm, f.Ymm,
+                    image?.FiducialMarks.FirstOrDefault(m => m.FiducialId == f.Id),
+                    showWhere))
+                .ToList();
 
-        FiducialGrid.ItemsSource = rows;
+        RefillTable(FiducialGrid, rows, r => r.FiducialId == keep);
 
         MeasureSummary.Text = _camera is null
             ? "点表 · 框标：尚未载入相机检校文件"
             : $"点表 · 框标 {_camera.Fiducials.Count} 个　本片已测 {image?.FiducialMarks.Count ?? 0} 个"
               + (image?.Interior is null ? "" : $"　内定向已完成：δ = {image.Interior.PixelSizeMm:0.00000} mm/px");
-
-        if (keep is { } id && rows.FirstOrDefault(r => r.FiducialId == id) is { } again)
-            FiducialGrid.SelectedItem = again;
-
     }
 
     private void FiducialGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
