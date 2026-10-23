@@ -16,7 +16,8 @@ src/
 │   ├── ImageView.xaml(.cs)         单个视窗：影像 + 变换 + 像点/框标取点与命中
 │   ├── ImageWorkspace.xaml(.cs)    工作区四态：单图 / 双图 / 模型 / 报告
 │   ├── FiducialEditorWindow.xaml(.cs)  框标坐标的手工录入与改正
-│   └── MainWindow.xaml.cs 等 7 个 partial  五区骨架，按职责拆分：
+│   └── MainWindow/                五区骨架，按职责拆成 7 个 partial
+│       ├── MainWindow.xaml          界面骨架（StartupUri 指向这里）
 │       ├── MainWindow.xaml.cs       333 行　外壳：菜单、工程读写、视图工具条、状态栏、底部页签
 │       ├── MainWindow.Interior.cs   520 行　内定向
 │       ├── MainWindow.Gcp.cs        506 行　控制点、刺点、放大影像
@@ -31,7 +32,9 @@ src/
 │   ├── CameraFile.cs               相机检校文件读取（E-FOTO .cmr / CSV）
 │   ├── ControlPointFile.cs         控制点文件读取（RTF / CSV）+ 放大影像发现
 │   ├── FiducialHelper.cs           框标方位描述与对称性判断
-│   └── NativeAlgorithms.cs         原生算法的 P/Invoke 封装 + 数据适配（判手性、换轴、结果过闸门）
+│   ├── NativeAlgorithms.cs         原生算法的 P/Invoke 封装 + 数据适配（判手性、换轴、结果过闸门）
+│   └── Tasks/
+│       └── ResectionTask.cs        后方交会流程：收集观测 → 判手性 → 换轴 → 解算 → 写回，无界面依赖
 └── Snap/                           开发工具：离屏渲染与自检（不参与解决方案构建）
 ```
 

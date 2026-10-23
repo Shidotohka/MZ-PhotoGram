@@ -17,7 +17,8 @@ namespace Photogrammetry.App;
 
 public partial class MainWindow : Window
 {
-    // 本类被拆成多个 partial 文件，见 Docs/重构计划.md 第 4 节：
+    // 本类被拆成多个 partial 文件，全部在本文件夹内，见 Docs/重构计划.md 第 4 节：
+    //   MainWindow.xaml         界面骨架
     //   MainWindow.xaml.cs      外壳：菜单、工程读写、视图工具条、状态栏、底部页签
     //   MainWindow.Library.cs   影像库
     //   MainWindow.Tree.cs      数据树
@@ -329,5 +330,63 @@ public partial class MainWindow : Window
         DiagPanel.Visibility = key == "diag" ? Visibility.Visible : Visibility.Collapsed;
         ResPanel.Visibility = key == "res" ? Visibility.Visible : Visibility.Collapsed;
         LogPanel.Visibility = key == "log" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ---------- 全局快捷键 ----------
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            if (e.Key == Key.N) { NewProject_Click(sender, e); e.Handled = true; return; }
+            if (e.Key == Key.O) { OpenProject_Click(sender, e); e.Handled = true; return; }
+            if (e.Key == Key.S) { SaveProject_Click(sender, e); e.Handled = true; return; }
+            if (e.Key == Key.I) { AddImage_Click(sender, e); e.Handled = true; return; }
+        }
+
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.S)
+        {
+            SaveProjectAs_Click(sender, e);
+            e.Handled = true;
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                if (_activeFiducialId is not null)
+                {
+                    CancelFiducialPicking();
+                    DiagSummary.Text = "已停止框标取点";
+                    DiagSummary.Foreground = DimBadge;
+                }
+                else if (_activeGcpId is not null)
+                {
+                    SetActiveGcp(null);
+                    GcpGrid.SelectedItem = null;
+                    DiagSummary.Text = "已停止刺点。在量测表里重新选一个控制点即可继续。";
+                    DiagSummary.Foreground = DimBadge;
+                }
+                else
+                {
+                    Workspace.CancelSelection();
+                }
+                e.Handled = true;
+                break;
+            case Key.Delete:
+                Workspace.DeleteSelected();
+                UpdateStatusCounts();
+                RefreshTree();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    // ---------- 忙碌遮罩 ----------
+
+    private void SetBusy(bool busy, string? text)
+    {
+        BusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        if (text is not null) BusyText.Text = text;
     }
 }
