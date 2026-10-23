@@ -57,9 +57,9 @@ public partial class MainWindow
     ///
     /// 只给离屏渲染工具（Snap）用——界面上没有入口，正常切换走模块栏。之所以放在
     /// 这里而不是工具里：哪个模块属于哪条方法，只有 <see cref="Workflows"/> 知道，
-    /// 工具自己去猜就会踩「选中了一个被藏起来的按钮」这个坑。
+    /// 工具自己去猜就会踩「选中了一个被藏起来的按钮」这个坑。全表见 MainWindow.Tooling.cs。
     /// </summary>
-    public bool SelectModuleForTooling(string moduleName)
+    internal bool SelectModuleForTooling(string moduleName)
     {
         var index = Array.FindIndex(Workflows, w => w.Steps.Contains(moduleName));
         if (index < 0) return false;

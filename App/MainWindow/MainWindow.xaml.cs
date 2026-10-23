@@ -173,8 +173,8 @@ public partial class MainWindow : Window
         await OpenProjectAsync(dialog.FileName);
     }
 
-    /// <summary>打开指定工程文件。也供离屏渲染工具调用。</summary>
-    public async Task OpenProjectAsync(string path)
+    /// <summary>打开指定工程文件。也供离屏渲染工具调用，见 MainWindow.Tooling.cs。</summary>
+    internal async Task OpenProjectAsync(string path)
     {
         try
         {

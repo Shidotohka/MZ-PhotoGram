@@ -57,16 +57,10 @@ public partial class MainWindow
     /// <summary>当前工作影像：鼠标所在视窗优先，否则取第一个载入影像的可见视窗。</summary>
     private ImageItem? CurrentImage => Workspace.ActiveView?.Image;
 
-    // ---- 供离屏渲染工具（src/Snap）读取的状态，正常交互不会用到 ----
-
-    public int GcpCount => _project.Gcps.Count;
-
-    public IReadOnlyList<Gcp> ControlPoints => _project.Gcps;
-
-    public Project CurrentProject => _project;
+    // ---- 离屏渲染工具（src/Snap）用的入口，全部是 internal，全表见 MainWindow.Tooling.cs ----
 
     /// <summary>点表里选中某个控制点（触发参考影像与刺点模式）。返回是否找到。</summary>
-    public bool SelectGcp(string gcpId)
+    internal bool SelectGcp(string gcpId)
     {
         if (GcpGrid.ItemsSource is not IEnumerable<GcpRow> rows) return false;
         var row = rows.FirstOrDefault(r => r.Id == gcpId);
@@ -91,9 +85,9 @@ public partial class MainWindow
 
     /// <summary>
     /// 载入控制点文件并刷新量测表。返回是否成功。
-    /// 也供离屏渲染工具（src/Snap）跳过文件对话框直接调用。
+    /// 离屏渲染工具（src/Snap）跳过文件对话框直接调这条，全表见 MainWindow.Tooling.cs。
     /// </summary>
-    public bool LoadControlPointsFrom(string path)
+    internal bool LoadControlPointsFrom(string path)
     {
         SetBusy(true, "正在读取控制点…");
         ControlPointImportResult result;
@@ -376,7 +370,7 @@ public partial class MainWindow
         BindGcpAt(e.GcpId, (int)Math.Round(e.I), (int)Math.Round(e.J), (sender as ImageView)?.Image);
 
     /// <summary>把某个控制点刺到指定像素上。返回是否成功（控制点不存在、没有影像都算失败）。</summary>
-    public bool BindGcpAt(string gcpId, int px, int py, ImageItem? image = null)
+    internal bool BindGcpAt(string gcpId, int px, int py, ImageItem? image = null)
     {
         image ??= CurrentImage;
         if (image is null) return false;

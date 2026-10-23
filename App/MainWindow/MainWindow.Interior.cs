@@ -34,8 +34,8 @@ public partial class MainWindow
         LoadCameraFrom(dialog.FileName);
     }
 
-    /// <summary>载入相机检校文件。返回是否成功；也供离屏渲染工具直接调用。</summary>
-    public bool LoadCameraFrom(string path)
+    /// <summary>载入相机检校文件。返回是否成功；也只给离屏渲染工具用，见 MainWindow.Tooling.cs。</summary>
+    internal bool LoadCameraFrom(string path)
     {
         Camera camera;
         try

@@ -56,9 +56,10 @@ public partial class MainWindow
 
     /// <summary>
     /// 跑一次后方交会并把结果摆到界面上。返回解算结果，失败时为 null。
-    /// 也供离屏渲染工具调用——注意这条路径会刷新点表与残差页，工具靠它出图。
+    /// 离屏渲染工具（src/Snap）的 M3 走这条——它要的是「解算后点表与残差页也刷新了」，
+    /// 所以不能绕开界面直接调 Core。全表见 MainWindow.Tooling.cs。
     /// </summary>
-    public ResectionResult? SolveResectionNow()
+    internal ResectionResult? SolveResectionNow()
     {
         SetBusy(true, "正在解算后方交会…");
         ResectionRun run;

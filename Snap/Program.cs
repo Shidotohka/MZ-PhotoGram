@@ -245,6 +245,16 @@ internal static class Program
         var h = (int)Math.Round(root.ActualHeight);
         Console.WriteLine($"root {w}x{h}");
 
+        // 状态栏右端的光标读数据跟着物理鼠标走：离屏窗口摆在本机 (0,0)，鼠标飘到哪
+        // 就显示哪一像素，于是同一份代码两次截图会在那一小段上不同（实测 6 次跑出 3 种哈希）。
+        // 截图前复位成「—」，让截图成为可比的基线。FindName 是 FrameworkElement 的公开方法，
+        // 不需要给窗口加任何入口。
+        if (win.FindName("StatusCursor") is System.Windows.Controls.TextBlock cursorReadout)
+        {
+            cursorReadout.Text = "—";
+            Pump(win);
+        }
+
         var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(root);
 
@@ -881,7 +891,7 @@ internal static class Program
             Console.WriteLine("[FAIL] 控制点导入失败");
             return;
         }
-        Console.WriteLine($"控制点 {win.GcpCount} 个");
+        Console.WriteLine($"控制点 {win.CurrentProject.Gcps.Count} 个");
 
         var io = image.Interior;
         if (io is null || !io.IsValid)
@@ -890,7 +900,7 @@ internal static class Program
             return;
         }
 
-        var gcps = win.ControlPoints.ToList();
+        var gcps = win.CurrentProject.Gcps.ToList();
         var cx = gcps.Average(g => g.X);
         var cy = gcps.Average(g => g.Y);
         var cz = gcps.Average(g => g.Z);
