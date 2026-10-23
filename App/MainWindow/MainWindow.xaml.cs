@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using Photogrammetry.App.Services;
 using Photogrammetry.Core;
 
 namespace Photogrammetry.App;
@@ -67,7 +68,8 @@ public partial class MainWindow : Window
     private static readonly Brush MutBadge = new SolidColorBrush(Color.FromRgb(0x58, 0x63, 0x6E));
     private static readonly Brush AccentBadge = new SolidColorBrush(Color.FromRgb(0x0F, 0x6F, 0xA8));
 
-    private readonly Dictionary<string, BitmapSource> _bitmapCache = new();
+    /// <summary>影像解码与缓存。只管位图，不弹窗、不碰工作区。</summary>
+    private readonly ImageLibrary _images = new();
 
     private Project _project = new() { Name = "未命名工程" };
     private string? _projectPath;
@@ -133,7 +135,7 @@ public partial class MainWindow : Window
     {
         _project = new Project { Name = "未命名工程" };
         _projectPath = null;
-        _bitmapCache.Clear();
+        _images.Clear();
         Workspace.Reset();
         RefreshTree();
         UpdateStatusCounts();
@@ -182,7 +184,7 @@ public partial class MainWindow : Window
             _project = project;
             _projectPath = path;
 
-            _bitmapCache.Clear();
+            _images.Clear();
             Workspace.Reset();
             RefreshTree();
             UpdateStatusCounts();

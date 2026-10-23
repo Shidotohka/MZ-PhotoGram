@@ -701,13 +701,13 @@ internal static class Program
 
             foreach (var g in result.Points)
             {
-                var zoom = ControlPointFile.FindZoomImage(result.ZoomDirectory, g.Id);
+                var zoom = ZoomImageIndex.FindImage(result.ZoomDirectory, g.Id);
                 Console.WriteLine($"    {g.Id,-6} {g.X,12:F3} {g.Y,12:F3} {g.Z,9:F3}  " +
                                   (zoom is null ? "无放大片" : Path.GetFileName(zoom)));
             }
 
             var missing = result.Points
-                .Count(g => ControlPointFile.FindZoomImage(result.ZoomDirectory, g.Id) is null);
+                .Count(g => ZoomImageIndex.FindImage(result.ZoomDirectory, g.Id) is null);
             Console.WriteLine($"  点数 {result.Points.Count}　缺放大片 {missing}");
             if (missing > 0) failures++;
             foreach (var w in result.Warnings) Console.WriteLine("  [WARN] " + w);

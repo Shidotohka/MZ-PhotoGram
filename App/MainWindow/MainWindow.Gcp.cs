@@ -146,7 +146,7 @@ public partial class MainWindow
         {
             foreach (var gcp in _project.Gcps)
             {
-                if (ControlPointFile.FindZoomImage(zoomDir, gcp.Id) is { } found)
+                if (ZoomImageIndex.FindImage(zoomDir, gcp.Id) is { } found)
                     _zoomImages[gcp.Id] = found;
             }
         }

@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using Photogrammetry.App.Services;
 using Photogrammetry.Core;
 
 namespace Photogrammetry.App;
@@ -63,7 +64,7 @@ public partial class MainWindow
     /// <summary>影像在工程里但还没解码过时，按需解码。</summary>
     private async Task<BitmapSource?> EnsureBitmapAsync(ImageItem item)
     {
-        if (_bitmapCache.TryGetValue(item.Id, out var cached)) return cached;
+        if (_images.TryGet(item.Id, out var cached)) return cached;
 
         if (item.FullPath is null || !File.Exists(item.FullPath))
         {
@@ -76,9 +77,8 @@ public partial class MainWindow
         try
         {
             SetBusy(true, $"正在读取 {item.Id} …");
-            var source = await Task.Run(() => DecodeImage(item.FullPath));
+            var source = await _images.LoadAsync(item.Id, item.FullPath);
 
-            _bitmapCache[item.Id] = source;
             item.Width = source.PixelWidth;
             item.Height = source.PixelHeight;
             item.FileState = ImageFileState.Ok;
@@ -106,20 +106,6 @@ public partial class MainWindow
         else Workspace.LoadInto(target, source, item);
 
         RefreshTree();
-    }
-
-    private static BitmapSource DecodeImage(string path)
-    {
-        var bytes = File.ReadAllBytes(path);
-        using var stream = new MemoryStream(bytes);
-
-        var image = new BitmapImage();
-        image.BeginInit();
-        image.CacheOption = BitmapCacheOption.OnLoad;
-        image.StreamSource = stream;
-        image.EndInit();
-        image.Freeze();
-        return image;
     }
 
     private void OnImageLoaded(object? sender, ImageItem item)

@@ -188,7 +188,7 @@ public partial class MainWindow
 
         Workspace.Unload(image);
         _project.Images.Remove(image);
-        _bitmapCache.Remove(image.Id);
+        _images.Remove(image.Id);
 
         RefreshTree();
         UpdateStatusCounts();

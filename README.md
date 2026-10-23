@@ -16,14 +16,16 @@ src/
 │   ├── ImageView.xaml(.cs)         单个视窗：影像 + 变换 + 像点/框标取点与命中
 │   ├── ImageWorkspace.xaml(.cs)    工作区四态：单图 / 双图 / 模型 / 报告
 │   ├── FiducialEditorWindow.xaml(.cs)  框标坐标的手工录入与改正
+│   ├── Services/
+│   │   └── ImageLibrary.cs           影像解码与缓存（只管路径 → 冻结位图）
 │   └── MainWindow/                五区骨架，按职责拆成 8 个 partial
 │       ├── MainWindow.xaml          界面骨架（StartupUri 指向这里）
-│       ├── MainWindow.xaml.cs       392 行　外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
+│       ├── MainWindow.xaml.cs       394 行　外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
 │       ├── MainWindow.Interior.cs   542 行　内定向（含框标表的行类型）
 │       ├── MainWindow.Gcp.cs        514 行　控制点、刺点、放大影像
 │       ├── MainWindow.Tree.cs       202 行　数据树
 │       ├── MainWindow.Resection.cs  161 行　后方交会（流程在 Core/Tasks，这里只剩显示）
-│       ├── MainWindow.Library.cs    155 行　影像库
+│       ├── MainWindow.Library.cs    141 行　影像库：添加、去重 Id、载入工作区
 │       ├── MainWindow.Modules.cs    133 行　作业方法与模块切换
 │       └── MainWindow.Tooling.cs     48 行　给 Snap 的 8 个 internal 入口登记表
 ├── Core/                           数据适配与流程控制（不含任何界面依赖，也不含平差计算）
@@ -31,7 +33,9 @@ src/
 │   ├── Model.cs                    工程实体：相机 / 框标 / 影像 / 控制点 / 像点 / 像对 / 模型 / 结果
 │   ├── ProjectFile.cs              工程索引读写（原子写、备份轮转、相对路径）
 │   ├── CameraFile.cs               相机检校文件读取（E-FOTO .cmr / CSV）
-│   ├── ControlPointFile.cs         控制点文件读取（RTF / CSV）+ 放大影像发现
+│   ├── ControlPointFile.cs         控制点文件解析（RTF / CSV）
+│   ├── RtfText.cs                  RTF 取纯文本（够用的一档，不追求完整规范）
+│   ├── ZoomImageIndex.cs           放大影像（点之记）目录发现与按点号取图
 │   ├── FiducialHelper.cs           框标方位描述与对称性判断
 │   ├── NativeAlgorithms.cs         原生算法的 P/Invoke 封装 + 数据适配（判手性、换轴、结果过闸门）
 │   └── Tasks/
