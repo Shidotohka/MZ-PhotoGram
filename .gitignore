@@ -1,0 +1,67 @@
+# ===== .NET 构建输出 =====
+**/bin/
+**/obj/
+**/publish/
+**/Publish/
+**/artifacts/
+**/TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.xml
+coverage*.json
+
+# ===== Visual Studio =====
+.vs/
+*.suo
+*.user
+*.rsuser
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.cache
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+*.sdf
+*.opensdf
+*.ipch
+
+# ===== WPF 临时工程文件 =====
+*_wpftmp.csproj
+*_wpftmp.csproj.*
+
+# ===== NuGet =====
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+
+# ===== ReSharper / Rider =====
+_ReSharper*/
+*.DotSettings.user
+.idea/
+*.sln.iml
+
+# ===== VS Code（可选：团队要共享配置就注释掉） =====
+.vscode/
+
+# ===== 日志和临时文件 =====
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# ===== 操作系统生成文件 =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== 本项目：目录树生成文件；如果 tree.txt 要提交，删掉这一行 =====
+/tree.txt

@@ -1,0 +1,64 @@
+<UserControl x:Class="Photogrammetry.App.ImageView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Border Background="#FFFFFF" BorderBrush="{StaticResource Line2Brush}"
+            BorderThickness="1" CornerRadius="4">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="26"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="{StaticResource ViewportHeaderBrush}"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1"
+                    CornerRadius="3,3,0,0">
+                <DockPanel Margin="10,0" LastChildFill="False">
+                    <TextBlock x:Name="CaptionText" Text="未选择影像" VerticalAlignment="Center"
+                               FontSize="11.5" Foreground="{StaticResource MutBrush}"/>
+
+                    <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="×"
+                            Width="18" Height="16" FontSize="13" Padding="0"
+                            VerticalAlignment="Center" Margin="0,0,2,0"
+                            Foreground="{StaticResource DimBrush}" Cursor="Hand"
+                            Visibility="Collapsed" Click="Close_Click" ToolTip="从工作区移除"/>
+
+                    <TextBlock x:Name="StateText" DockPanel.Dock="Right" VerticalAlignment="Center"
+                               FontSize="11" FontFamily="Consolas" Foreground="{StaticResource DimBrush}"
+                               Margin="0,0,8,0"/>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Row="1" x:Name="Host" ClipToBounds="True"
+                  Background="{StaticResource WorkspaceBgBrush}"
+                  MouseWheel="Host_MouseWheel"
+                  MouseDown="Host_MouseDown"
+                  MouseUp="Host_MouseUp"
+                  MouseMove="Host_MouseMove"
+                  MouseLeave="Host_MouseLeave"
+                  MouseLeftButtonDown="Host_MouseLeftButtonDown"
+                  MouseRightButtonDown="Host_MouseRightButtonDown">
+
+                <!-- Canvas 不约束子元素，避免 Grid 布局裁剪把影像截断 -->
+                <Canvas x:Name="Surface" HorizontalAlignment="Left" VerticalAlignment="Top">
+                    <Image x:Name="Photo" Stretch="Fill" Canvas.Left="0" Canvas.Top="0"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Canvas>
+
+                <Canvas x:Name="Overlay" IsHitTestVisible="False"/>
+
+                <TextBlock x:Name="EmptyHint" Text="待载入影像"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           FontSize="12" Foreground="{StaticResource DimBrush}"/>
+
+                <Border x:Name="DropHint" Visibility="Collapsed" Margin="6"
+                        Background="#CCE7F1F8" BorderBrush="{StaticResource AccentBrush}"
+                        BorderThickness="2" CornerRadius="4" IsHitTestVisible="False">
+                    <TextBlock Text="松开以载入到此处" HorizontalAlignment="Center"
+                               VerticalAlignment="Center" FontSize="12"
+                               Foreground="{StaticResource AccentBrush}"/>
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

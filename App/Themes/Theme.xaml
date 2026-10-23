@@ -1,0 +1,219 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 浅色调色板：白底、黑字、蓝色强调 -->
+    <SolidColorBrush x:Key="BgBrush" Color="#F4F6F8"/>
+    <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="Panel2Brush" Color="#F7F9FA"/>
+    <SolidColorBrush x:Key="Panel3Brush" Color="#EDF1F4"/>
+    <SolidColorBrush x:Key="LineBrush" Color="#E1E6EB"/>
+    <SolidColorBrush x:Key="Line2Brush" Color="#C9D2D9"/>
+    <SolidColorBrush x:Key="TextBrush" Color="#16191D"/>
+    <SolidColorBrush x:Key="MutBrush" Color="#58636E"/>
+    <SolidColorBrush x:Key="DimBrush" Color="#8B959F"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#0F6FA8"/>
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#E7F1F8"/>
+    <SolidColorBrush x:Key="OkBrush" Color="#1E8E5A"/>
+    <SolidColorBrush x:Key="WarnBrush" Color="#A86A12"/>
+    <SolidColorBrush x:Key="ErrBrush" Color="#C0392B"/>
+    <SolidColorBrush x:Key="WorkspaceBgBrush" Color="#E9EEF3"/>
+    <SolidColorBrush x:Key="ViewportHeaderBrush" Color="#F6F9FB"/>
+    <SolidColorBrush x:Key="CrosshairBrush" Color="#B7C3CD"/>
+
+    <LinearGradientBrush x:Key="TitleGradientBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFFFFF" Offset="0"/>
+        <GradientStop Color="#F1F4F7" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- 影像视窗底纹：浅灰网格 -->
+    <DrawingBrush x:Key="ViewportGridBrush" TileMode="Tile"
+                  Viewport="0,0,32,32" ViewportUnits="Absolute">
+        <DrawingBrush.Drawing>
+            <GeometryDrawing>
+                <GeometryDrawing.Geometry>
+                    <GeometryGroup>
+                        <LineGeometry StartPoint="0,0" EndPoint="0,32"/>
+                        <LineGeometry StartPoint="0,0" EndPoint="32,0"/>
+                    </GeometryGroup>
+                </GeometryDrawing.Geometry>
+                <GeometryDrawing.Pen>
+                    <Pen Brush="#E6EBF0" Thickness="1"/>
+                </GeometryDrawing.Pen>
+            </GeometryDrawing>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
+    <!-- 下拉菜单 -->
+    <Style x:Key="MenuPopup" TargetType="ContextMenu">
+        <Setter Property="Background" Value="#FFFFFF"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Line2Brush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="4"/>
+        <Setter Property="HasDropShadow" Value="True"/>
+        <Setter Property="MinWidth" Value="190"/>
+    </Style>
+
+    <Style x:Key="MenuItemStyle" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="3" Padding="10,6">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter Grid.Column="0" ContentSource="Header"
+                                              VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{TemplateBinding InputGestureText}"
+                                       FontSize="11" FontFamily="Consolas"
+                                       Foreground="{StaticResource DimBrush}"
+                                       Margin="26,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource DimBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 全局隐式样式：弹出菜单里的 MenuItem 统一外观（含分隔线两侧） -->
+    <Style TargetType="MenuItem" BasedOn="{StaticResource MenuItemStyle}"/>
+
+    <!-- 模块栏页签 -->
+    <Style x:Key="ModuleTab" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource MutBrush}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Bg" Background="Transparent"/>
+                        <Border x:Name="Bar" Height="2" Margin="10,0" VerticalAlignment="Bottom"
+                                Background="Transparent" CornerRadius="1"/>
+                        <ContentPresenter Margin="18,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="#EFF3F6"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter TargetName="Bar" Property="Background" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 底部页签 -->
+    <Style x:Key="BottomTab" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource MutBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Bar" Height="2" VerticalAlignment="Bottom"
+                                Background="Transparent"/>
+                        <ContentPresenter Margin="12,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Bar" Property="Background" Value="{StaticResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 作业方法下拉框：标题栏里选择走哪条流程 -->
+    <Style x:Key="MethodCombo" TargetType="ComboBox">
+        <Setter Property="Height" Value="26"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+        <Setter Property="Padding" Value="8,0"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
+    <!-- 工具栏按钮 -->
+    <Style x:Key="ToolBtn" TargetType="Button">
+        <Setter Property="Foreground" Value="{StaticResource MutBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="5"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#EDF1F5"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#E2E8EE"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 影像视窗：外框 + 底纹 + 标题条 + 十字线 -->
+    <Style x:Key="Viewport" TargetType="ContentControl">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid>
+                        <Border Background="#FFFFFF" BorderBrush="{StaticResource Line2Brush}"
+                                BorderThickness="1" CornerRadius="4"/>
+                        <Rectangle Margin="1" Fill="{StaticResource ViewportGridBrush}"/>
+
+                        <Border Height="26" VerticalAlignment="Top" CornerRadius="3,3,0,0"
+                                Background="{StaticResource ViewportHeaderBrush}"
+                                BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+                            <TextBlock Text="{TemplateBinding Content}" Margin="10,0"
+                                       VerticalAlignment="Center" FontSize="11.5"
+                                       Foreground="{StaticResource MutBrush}"/>
+                        </Border>
+
+                        <Border Width="1" Height="26" Background="{StaticResource CrosshairBrush}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border Width="26" Height="1" Background="{StaticResource CrosshairBrush}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                        <TextBlock Text="待载入" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Margin="0,56,0,0" FontSize="12" Foreground="{StaticResource DimBrush}"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>
