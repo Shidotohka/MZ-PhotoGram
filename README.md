@@ -16,7 +16,14 @@ src/
 │   ├── ImageView.xaml(.cs)         单个视窗：影像 + 变换 + 像点/框标取点与命中
 │   ├── ImageWorkspace.xaml(.cs)    工作区四态：单图 / 双图 / 模型 / 报告
 │   ├── FiducialEditorWindow.xaml(.cs)  框标坐标的手工录入与改正
-│   └── MainWindow.xaml(.cs)        五区骨架 + 菜单 + 数据树 + 检查器 + 底部页签
+│   └── MainWindow.xaml.cs 等 7 个 partial  五区骨架，按职责拆分：
+│       ├── MainWindow.xaml.cs       333 行　外壳：菜单、工程读写、视图工具条、状态栏、底部页签
+│       ├── MainWindow.Interior.cs   520 行　内定向
+│       ├── MainWindow.Gcp.cs        506 行　控制点、刺点、放大影像
+│       ├── MainWindow.Resection.cs  277 行　后方交会
+│       ├── MainWindow.Tree.cs       202 行　数据树
+│       ├── MainWindow.Library.cs    155 行　影像库
+│       └── MainWindow.Modules.cs    133 行　作业方法与模块切换
 ├── Core/                           数据适配与流程控制（不含任何界面依赖，也不含平差计算）
 │   ├── Coordinates.cs              四种坐标类型 + 像素↔像平面换算 + 地面轴序（手性判定、换轴）
 │   ├── Model.cs                    工程实体：相机 / 框标 / 影像 / 控制点 / 像点 / 像对 / 模型 / 结果
