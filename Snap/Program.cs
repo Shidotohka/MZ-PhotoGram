@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -10,6 +12,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Photogrammetry.App;
 using Photogrammetry.Core;
+using Photogrammetry.Core.Tasks;
 
 namespace Snap;
 
@@ -34,6 +37,18 @@ internal static class Program
         {
             ProbeProject(Get(args, "--project")
                          ?? Path.Combine("Data", "real", "Real_test.pht"));
+            return;
+        }
+
+        if (args.Any(a => string.Equals(a, "--intersect", StringComparison.OrdinalIgnoreCase)))
+        {
+            IntersectCheck();
+            return;
+        }
+
+        if (args.Any(a => string.Equals(a, "--abi", StringComparison.OrdinalIgnoreCase)))
+        {
+            AbiCheck();
             return;
         }
 
@@ -204,6 +219,13 @@ internal static class Program
                 workspace.ZoomBy(zoom);
                 Pump(win);
             }
+        }
+
+        // 前方交会的界面端到端：两张片装上内/外方位 → 各点一个同名点 → 按解算
+        if (args.Any(a => string.Equals(a, "--intersect-demo", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunIntersectDemo(win);
+            Pump(win);
         }
 
         // M3：载入真实控制点 → 按已知外方位反算像素位置刺点 → 解算后方交会 → 截图
@@ -882,6 +904,96 @@ internal static class Program
     /// M3 端到端：载入控制点文件，按一个已知外方位把每个控制点正投影成像素位置再刺点，
     /// 然后走界面上的解算流程，检查能否把外方位反解回来、σ₀ 是否为 0。
     /// </summary>
+    /// <summary>
+    /// 前方交会的界面端到端：给左窗、右窗的影像装上内方位与一组已知外方位，
+    /// 按几何把同一个地面点投影成两张片上的像素，走<b>视窗自己的取点路径</b>点上去，
+    /// 再按「解算交会点」，检查结果与真值、以及面板上真的显示了坐标。
+    ///
+    /// <para>与 <c>--intersect</c> 分工不同：那条验数学与闸门，不碰界面；这条验界面接线。</para>
+    /// </summary>
+    private static void RunIntersectDemo(MainWindow win)
+    {
+        Console.WriteLine("\n前方交会界面端到端─────────────────────────────────────");
+
+        var ws = FindChild<ImageWorkspace>(win);
+        var views = ws?.VisibleViews().Where(v => v.HasImage).ToList();
+        if (ws is null || views is null || views.Count != 2)
+        {
+            Console.WriteLine("[FAIL] 需要两张片：--image 左片 --loadsecond 右片");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        const double f = 152.72;
+        const double pixelMm = 0.04503;
+        const double h = 3000.0;
+
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
+        var items = views.Select(v => v.Image!).ToList();
+
+        // 旁向重叠 30%：基线 = 短边幅面的 70%，与 --intersect 自检同一套几何
+        var swathM = items[0].Height * pixelMm / f * h;
+        var baseM = 0.70 * swathM;
+
+        for (var k = 0; k < 2; k++)
+        {
+            items[k].Interior = io;
+            items[k].Exterior = new ExteriorOrientation
+            {
+                Xs = 1000,
+                Ys = 2000 + k * baseM,
+                Zs = h,
+                Phi = k == 0 ? -0.5 : -0.45,
+                Omega = k == 0 ? 0.3 : 0.25,
+                Kappa = k == 0 ? 2.0 : 2.4,
+            };
+        }
+
+        var truth = new GroundPointM(1000, 2000 + baseM / 2, h - 2500);
+        Console.WriteLine($"真值 {truth.X:0.000}, {truth.Y:0.000}, {truth.Z:0.000} m　" +
+                          $"基线 {baseM:0} m　航高 {h:0} m");
+
+        for (var k = 0; k < 2; k++)
+        {
+            var mm = NativeAlgorithms.ProjectPoint(f, items[k].Exterior!, truth);
+            if (mm is not { } m)
+            {
+                Console.WriteLine($"[FAIL] 第 {k + 1} 张片投影失败");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var px = CoordinateConverter.ImagePlaneToPixel(m, io, items[k].Width, items[k].Height);
+            // 走视窗自己的取点路径：会在影像上留下看得见的临时像点，并触发选中事件
+            views[k].AddPointAt(new Point(px.I, px.J));
+            Console.WriteLine($"  第 {k + 1} 张片 {items[k].Id}：像素 ({px.I}, {px.J})");
+        }
+
+        Pump(win);
+
+        var run = win.SolveIntersectionNow();
+        if (!run.Success)
+        {
+            Console.WriteLine($"[FAIL] 交会没解出来：{run.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var result = run.Result!;
+        var err = Distance(result.Point, truth);
+        Console.WriteLine($"交会 {result.Point.X:0.000}, {result.Point.Y:0.000}, {result.Point.Z:0.000} m　" +
+                          $"误差 {err:0.000} m　交会角 {result.ConvergenceAngleDeg:0.00}°");
+        Console.WriteLine(err < 1.5
+            ? "[PASS] 两张片各点一下 → 交会点回到整像素量化能解释的范围内"
+            : "[FAIL] 交会点偏差超出整像素量化能解释的范围");
+
+        var panel = win.FindName("IntersectionResultText") as TextBlock;
+        var shown = panel?.Text ?? "";
+        Console.WriteLine(shown.Contains("交会点") && shown.Contains("交会角")
+            ? "[PASS] 面板上显示了交会结果"
+            : $"[FAIL] 面板没有显示结果：[{shown}]");
+    }
+
     private static void RunM3(MainWindow win, ImageItem image, string gcpFile)
     {
         Console.WriteLine("\nM3 端到端───────────────────────────────────────────────");
@@ -979,6 +1091,224 @@ internal static class Program
                 ? "[PASS] 已进入刺点模式，左键点影像可绑定控制点"
                 : "[FAIL] 没有进入刺点模式");
         }
+    }
+
+    /// <summary>
+    /// 打印托管 → 原生这一侧的 ABI 清单：每个带 <c>StructLayout</c> 的结构体的字段顺序、类型、
+    /// 字节偏移，以及全部 <c>DllImport</c> 签名。
+    ///
+    /// <para>用途是重构时的对表。封送布局错一个字段（类型、顺序、SizeConst）<b>不会编译报错</b>，
+    /// 但解算会静默算错。改 ABI 前后各跑一次，把输出 diff 比看代码可靠。</para>
+    /// </summary>
+    /// <summary>
+    /// 前方交会的端到端自检：造一对旁向重叠约 30% 的像对，把一个已知地面点投影到两片，
+    /// 再用交会把它解回来。数值与闸门各有覆盖——闸门那几条（交会角太小、缺外方位、
+    /// 点不在框幅里）比数值更容易写错，而且错了界面会给出误导人的提示。
+    /// </summary>
+    private static void IntersectCheck()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        Console.WriteLine("前方交会自检");
+        Console.WriteLine(new string('=', 78));
+
+        const double f = 152.72;
+        const double pixelMm = 0.04503;
+        const int width = 5616;
+        const int height = 3744;
+        const double h = 3000.0;
+
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
+
+        // 旁向重叠 30%：重叠在<b>短边</b>（3744 像素）方向，基线 = 短边幅面的 70%
+        var swathM = height * pixelMm / f * h;
+        var baseM = 0.70 * swathM;
+
+        ImageItem Cam(string id, double ys, double phi, double omega, double kappa) => new()
+        {
+            Id = id,
+            Width = width,
+            Height = height,
+            Interior = io,
+            Exterior = new ExteriorOrientation
+            {
+                Xs = 1000, Ys = ys, Zs = h, Phi = phi, Omega = omega, Kappa = kappa
+            }
+        };
+
+        var left = Cam("L", 2000, -0.5, 0.3, 2.0);
+        var right = Cam("R", 2000 + baseM, -0.45, 0.25, 2.4);
+
+        // 交会点取在重叠区正中、比摄影中心低 2500 m
+        var truth = new GroundPointM(1000, 2000 + baseM / 2, h - 2500);
+
+        var lmm = NativeAlgorithms.ProjectPoint(f, left.Exterior!, truth);
+        var rmm = NativeAlgorithms.ProjectPoint(f, right.Exterior!, truth);
+        if (lmm is not { } l || rmm is not { } r)
+        {
+            Console.WriteLine("FAIL  投影失败，后面全部跳过");
+            Console.WriteLine("\nSELFTEST FAIL");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var halfW = 0.5 * width * pixelMm;
+        var halfH = 0.5 * height * pixelMm;
+        Check("像点落在框幅内",
+            Math.Abs(l.X) < halfW && Math.Abs(l.Y) < halfH &&
+            Math.Abs(r.X) < halfW && Math.Abs(r.Y) < halfH,
+            $"左 ({l.X:+0.00;-0.00}, {l.Y:+0.00;-0.00}) mm　右 ({r.X:+0.00;-0.00}, {r.Y:+0.00;-0.00}) mm");
+
+        // ---- 精确像点：验交会本身，不掺整像素量化
+        var exact = NativeAlgorithms.IntersectRays(left.Exterior!, right.Exterior!, l, r, f, 0.02);
+        var exactErr = Distance(exact.Point, truth);
+        Check("精确像点 → 交会点回到真值", exact.Success && exactErr < 1e-6,
+            $"误差 {exactErr:E3} m");
+        Check("交会角在合理区间", exact.ConvergenceAngleDeg is > 45 and < 55,
+            $"{exact.ConvergenceAngleDeg:0.00}°（旁向基线 {baseM:0} m、航高 {h:0} m）");
+        Check("基线长度", Math.Abs(exact.BaseLength - baseM) < 0.5,
+            $"{exact.BaseLength:0.000} m");
+        Check("残余上下视差与交会差", Math.Abs(exact.VerticalParallaxMm) < 1e-9 &&
+                                   Math.Abs(exact.MissDistance) < 1e-6,
+            $"视差 {exact.VerticalParallaxMm:E2} mm　交会差 {exact.MissDistance:E2} m");
+        // 投影系数配的是未归一化的方向向量 (x, y, -f)：N·|d| 就是摄影中心到交会点的距离。
+        // 顺势验一下方向向量的定义没被改过——两片的 |d| 本来就不相等（x/y 不同），
+        // 所以 N₁/N₂ 并不等于 Range₁/Range₂。
+        var lenL = Math.Sqrt(l.X * l.X + l.Y * l.Y + f * f);
+        var lenR = Math.Sqrt(r.X * r.X + r.Y * r.Y + f * f);
+        Check("投影系数与距离自洽",
+            Math.Abs(exact.NLeft * lenL - exact.RangeLeft) < 1e-6 &&
+            Math.Abs(exact.NRight * lenR - exact.RangeRight) < 1e-6,
+            $"N·|d| 左 {exact.NLeft * lenL:0.0000}、右 {exact.NRight * lenR:0.0000} m　" +
+            $"（N 左 {exact.NLeft:0.0000}　N 右 {exact.NRight:0.0000}）");
+
+        // ---- 走流程层：像素坐标进，地面坐标出（含整像素量化）
+        var lp = CoordinateConverter.ImagePlaneToPixel(l, io, width, height);
+        var rp = CoordinateConverter.ImagePlaneToPixel(r, io, width, height);
+        var run = IntersectionTask.Solve(left, right, lp, rp);
+        var pixErr = Distance(run.Point, truth);
+        Check("像素点 → 交会点（含整像素量化）", run.Success && pixErr < 1.5,
+            $"左 ({lp.I},{lp.J}) 右 ({rp.I},{rp.J})　误差 {pixErr:0.000} m");
+        Check("精度指标非零", run.Success && run.Result!.MX > 0 && run.Result.MZ >= run.Result.MX,
+            $"mX {run.Result?.MX:0.000}　mY {run.Result?.MY:0.000}　mZ {run.Result?.MZ:0.000} m");
+        Check("单点无警告", run.Warnings.Count == 0,
+            run.Warnings.Count == 0 ? "干净" : string.Join("；", run.Warnings));
+
+        // ---- 小基线：交会角不足时必须提醒，不能静静给个数
+        var close = Cam("R2", 2000 + 40, -0.45, 0.25, 2.4);
+        var closeMm = NativeAlgorithms.ProjectPoint(f, close.Exterior!, truth)!.Value;
+        var closePixel = CoordinateConverter.ImagePlaneToPixel(closeMm, io, width, height);
+        var closeRun = IntersectionTask.Solve(left, close, lp, closePixel);
+        Check("小基线触发交会角提醒",
+            closeRun.Success && closeRun.Warnings.Any(w => w.Contains("交会角")),
+            closeRun.Success
+                ? $"{closeRun.Result!.ConvergenceAngleDeg:0.00}°　{closeRun.Warnings.Count} 条提示"
+                : closeRun.Message);
+
+        // ---- 闸门
+        Check("同一张片被拒", IntersectionTask.Solve(left, left, lp, rp).Failure == IntersectionFailure.SameImage,
+            IntersectionTask.Solve(left, left, lp, rp).Failure.ToString());
+
+        var noExterior = Cam("N", 2000 + baseM, 0, 0, 0);
+        noExterior.Exterior = null;
+        Check("缺绝对外方位被拒",
+            IntersectionTask.Solve(left, noExterior, lp, rp).Failure == IntersectionFailure.NoExterior,
+            IntersectionTask.Solve(left, noExterior, lp, rp).Message);
+
+        Check("没点右片被拒",
+            IntersectionTask.Solve(left, right, lp, null).Failure == IntersectionFailure.RightNotMeasured,
+            IntersectionTask.Solve(left, right, lp, null).Message);
+
+        Check("像点出界被拒",
+            IntersectionTask.Solve(left, right, new ImagePixel(-5, 10), rp).Failure
+                == IntersectionFailure.PixelOutsideImage,
+            "I = -5");
+
+        Console.WriteLine();
+        Console.WriteLine(failures == 0 ? "SELFTEST PASS" : $"SELFTEST FAIL ({failures})");
+        Environment.ExitCode = failures == 0 ? 0 : 1;
+    }
+
+    private static double Distance(GroundPointM a, GroundPointM b)
+    {
+        var dx = a.X - b.X;
+        var dy = a.Y - b.Y;
+        var dz = a.Z - b.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private static void AbiCheck()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        var asm = typeof(NativeAlgorithms).Assembly;
+        Console.WriteLine("ABI 布局清单");
+        Console.WriteLine(new string('=', 78));
+
+        // 注意：StructLayout 不是保留在元数据里的自定义特性，GetCustomAttribute 拿不到；
+        // 它落在 TypeAttributes 的布局标志上，要通过 Type.StructLayoutAttribute 读。
+        var structs = asm.GetTypes()
+            .Where(t => t.IsValueType && !t.IsEnum && !t.IsPrimitive)
+            .Where(t => t.StructLayoutAttribute is { Value: LayoutKind.Sequential or LayoutKind.Explicit })
+            // 编译器生成的内联数组初始化类型，跟 ABI 无关，留着只会让对比出假差异
+            .Where(t => t.DeclaringType?.Name != "<PrivateImplementationDetails>")
+            .OrderBy(t => t.Name, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var t in structs)
+        {
+            Console.WriteLine($"struct {t.Name}  size={SizeOf(t)}  declaring={t.DeclaringType?.Name ?? "-"}");
+
+            foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                var extra = f.GetCustomAttribute<MarshalAsAttribute>() is { } ma
+                    ? $"  MarshalAs({ma.Value}" +
+                      (ma.Value == UnmanagedType.ByValArray ? $", SizeConst={ma.SizeConst}" : "") + ")"
+                    : "";
+                Console.WriteLine($"    {f.Name,-16} {f.FieldType.Name,-10} off={OffsetOf(t, f)}{extra}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("DllImport 声明");
+        Console.WriteLine(new string('=', 78));
+
+        var imports = asm.GetTypes()
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+            .Where(m => m.GetCustomAttribute<DllImportAttribute>() is not null)
+            .OrderBy(m => m.Name, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var m in imports)
+        {
+            var d = m.GetCustomAttribute<DllImportAttribute>()!;
+            var ps = string.Join(", ", m.GetParameters().Select(p => $"{p.ParameterType.Name} {p.Name}"));
+            Console.WriteLine($"{d.Value}!{d.EntryPoint ?? m.Name}  conv={d.CallingConvention}  " +
+                              $"{m.ReturnType.Name} ({ps})");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"struct {structs.Count} 个　DllImport {imports.Count} 个");
+        Console.WriteLine("ABI 清单打印完毕");
+    }
+
+    private static string SizeOf(Type t)
+    {
+        try { return Marshal.SizeOf(t).ToString(CultureInfo.InvariantCulture); }
+        catch (ArgumentException) { return "?"; }
+    }
+
+    private static string OffsetOf(Type t, FieldInfo f)
+    {
+        try { return Marshal.OffsetOf(t, f.Name).ToInt64().ToString(CultureInfo.InvariantCulture); }
+        catch (ArgumentException) { return "?"; }
     }
 
     private static void FiducialCheck(string dir)

@@ -193,7 +193,7 @@ public static class ResectionTask
             };
         }
 
-        Apply(image, result);
+        Apply(image, result, evidence.Order);
 
         return new ResectionRun
         {
@@ -205,11 +205,12 @@ public static class ResectionTask
         };
     }
 
-    /// <summary>把解算结果写回模型：外方位、影像状态、逐点残差与像平面坐标。</summary>
-    private static void Apply(ImageItem image, ResectionResult result)
+    /// <summary>把解算结果写回模型：外方位、影像状态、地面轴序、逐点残差与像平面坐标。</summary>
+    private static void Apply(ImageItem image, ResectionResult result, GroundAxisOrder order)
     {
         image.Exterior = result.ToExterior();
         image.Status = ImageStatus.Oriented;
+        image.GroundOrder = order;
 
         foreach (var residual in result.Residuals)
         {

@@ -167,6 +167,58 @@ public sealed class ResectionResult
 }
 
 /// <summary>
+/// 一次空间前方交会的结果。算法在 <c>photogrammetry.dll</c> 中，这里只承载返回值。
+///
+/// <para><see cref="Point"/> 在<b>数学系</b>：X 指东、Y 指北、Z 指天顶，与
+/// <see cref="ResectionResult"/> 解出的外方位同一个系，可以直接混用。</para>
+/// </summary>
+public sealed class IntersectionResult
+{
+    /// <summary>是否可接受。</summary>
+    public bool Success { get; init; }
+
+    /// <summary>原生库返回码，0 为成功。</summary>
+    public int ErrorCode { get; init; }
+
+    /// <summary>失败原因。成功时为空串。</summary>
+    public string Message { get; init; } = string.Empty;
+
+    /// <summary>交会出的地面点，m，数学系。失败时不可用。</summary>
+    public GroundPointM Point { get; init; }
+
+    /// <summary>教材的投影系数 N₁、N₂。</summary>
+    public double NLeft { get; init; }
+    public double NRight { get; init; }
+
+    /// <summary>交会角，度。就是两条视线的夹角，也是精度好坏的主因。</summary>
+    public double ConvergenceAngleDeg { get; init; }
+
+    /// <summary>基线长度，m。</summary>
+    public double BaseLength { get; init; }
+
+    /// <summary>两个摄影中心到交会点的距离，m。</summary>
+    public double RangeLeft { get; init; }
+    public double RangeRight { get; init; }
+
+    /// <summary>两条视线的最近距离，m。理想情况下为 0。</summary>
+    public double MissDistance { get; init; }
+
+    /// <summary>把交会点反投影回两片后与量测像点之差，mm（v = 计算 − 观测）。</summary>
+    public double ResidualLeftXmm { get; init; }
+    public double ResidualLeftYmm { get; init; }
+    public double ResidualRightXmm { get; init; }
+    public double ResidualRightYmm { get; init; }
+
+    /// <summary>剩余上下视差，mm（vy左 − vy右）。</summary>
+    public double VerticalParallaxMm { get; init; }
+
+    /// <summary>交会点中误差，单位同地面坐标。</summary>
+    public double MX { get; init; }
+    public double MY { get; init; }
+    public double MZ { get; init; }
+}
+
+/// <summary>
 /// 原生算法库的托管入口，同时承担这条流水线上的<b>数据适配</b>。
 /// <para>
 /// 职责划分（界面设计规范 §8.1）：平差、迭代、投影在 <c>photogrammetry.dll</c> 里，
@@ -175,109 +227,17 @@ public sealed class ResectionResult
 /// </summary>
 public static class NativeAlgorithms
 {
-    private const string Library = "photogrammetry";
-
     /// <summary>4 个框标以下不允许解算：3 个时多余观测为 0，残差恒为 0。</summary>
     public const int MinFiducials = 4;
 
     /// <summary>原生返回码：b₂ ≥ 0，y 轴符号异常。多半是框标编号与点位对不上。</summary>
     public const int ErrorAxisSign = 6;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Input
-    {
-        public int Count;
-        public IntPtr FiducialX;
-        public IntPtr FiducialY;
-        public IntPtr ImageI;
-        public IntPtr ImageJ;
-        public int ImageWidth;
-        public int ImageHeight;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Output
-    {
-        public double A0, A1, A2, B0, B1, B2;
-        public double Sx, Sy, PixelSize;
-        public double X0, Y0;
-        public double PrincipalI, PrincipalJ;
-        public double ThetaIDeg, ThetaJDeg;
-        public double Sigma0;
-        public double MaxAbsResidual;
-        public int UsedCount;
-        public int Redundancy;
-        public IntPtr ResidualX;
-        public IntPtr ResidualY;
-    }
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int pgm_fiducial_orientation(ref Input input, ref Output output);
-
-    // ---------------------------------------------------------------- 后方交会
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ResectionInput
-    {
-        public int Count;
-        public IntPtr ImageX;
-        public IntPtr ImageY;
-        public IntPtr GroundX;
-        public IntPtr GroundY;
-        public IntPtr GroundZ;
-        public double FocalLengthMm;
-        public int UseInitial;
-        public double InitialXs, InitialYs, InitialZs;
-        public double InitialPhi, InitialOmega, InitialKappa;
-        public int MaxIterations;
-        public double ToleranceLength;
-        public double ToleranceAngle;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ResectionOutput
-    {
-        public double Xs, Ys, Zs;
-        public double PhiRad, OmegaRad, KappaRad;
-        public double PhiDeg, OmegaDeg, KappaDeg;
-
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 9)]
-        public double[] Rotation;
-
-        public int Iterations;
-        public int UsedCount;
-        public int Redundancy;
-
-        public double Sigma0Mm;
-        public double MaxAbsResidualMm;
-        public double MXs, MYs, MZs;
-        public double MPhi, MOmega, MKappa;
-        public double Condition;
-        public IntPtr ResidualX;
-        public IntPtr ResidualY;
-    }
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int pgm_resection(ref ResectionInput input, ref ResectionOutput output);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int pgm_project_point(
-        double focalLengthMm, double xs, double ys, double zs,
-        double phiRad, double omegaRad, double kappaRad,
-        double groundX, double groundY, double groundZ,
-        out double outXmm, out double outYmm);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr pgm_version();
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr pgm_last_error();
-
     /// <summary>原生库版本。</summary>
-    public static string Version => Marshal.PtrToStringUTF8(pgm_version()) ?? string.Empty;
+    public static string Version => Marshal.PtrToStringUTF8(NativeAbi.pgm_version()) ?? string.Empty;
 
     /// <summary>最近一次原生调用的错误描述。</summary>
-    public static string LastError => Marshal.PtrToStringUTF8(pgm_last_error()) ?? string.Empty;
+    public static string LastError => Marshal.PtrToStringUTF8(NativeAbi.pgm_last_error()) ?? string.Empty;
 
     /// <summary>
     /// 六参数仿射内定向。按 <see cref="FiducialPoint.Id"/> 与 <see cref="FiducialObservation.Id"/> 配对，
@@ -336,7 +296,7 @@ public static class NativeAlgorithms
             prx = Marshal.AllocHGlobal(n * sizeof(double));
             pry = Marshal.AllocHGlobal(n * sizeof(double));
 
-            var input = new Input
+            var input = new NativeAbi.Input
             {
                 Count = n,
                 FiducialX = pfx,
@@ -346,12 +306,12 @@ public static class NativeAlgorithms
                 ImageWidth = imageWidth,
                 ImageHeight = imageHeight,
             };
-            var output = new Output { ResidualX = prx, ResidualY = pry };
+            var output = new NativeAbi.Output { ResidualX = prx, ResidualY = pry };
 
             int rc;
             try
             {
-                rc = pgm_fiducial_orientation(ref input, ref output);
+                rc = NativeAbi.pgm_fiducial_orientation(ref input, ref output);
             }
             catch (DllNotFoundException)
             {
@@ -682,7 +642,7 @@ public static class NativeAlgorithms
             prx = Marshal.AllocHGlobal(n * sizeof(double));
             pry = Marshal.AllocHGlobal(n * sizeof(double));
 
-            var input = new ResectionInput
+            var input = new NativeAbi.ResectionInput
             {
                 Count = n,
                 ImageX = pox,
@@ -703,7 +663,7 @@ public static class NativeAlgorithms
                 ToleranceAngle = 0,
             };
 
-            var output = new ResectionOutput
+            var output = new NativeAbi.ResectionOutput
             {
                 Rotation = new double[9],
                 ResidualX = prx,
@@ -713,7 +673,7 @@ public static class NativeAlgorithms
             int rc;
             try
             {
-                rc = pgm_resection(ref input, ref output);
+                rc = NativeAbi.pgm_resection(ref input, ref output);
             }
             catch (DllNotFoundException)
             {
@@ -797,13 +757,111 @@ public static class NativeAlgorithms
         double focalLengthMm, ExteriorOrientation eo, GroundPointM ground)
     {
         ArgumentNullException.ThrowIfNull(eo);
-        var rc = pgm_project_point(
+        var rc = NativeAbi.pgm_project_point(
             focalLengthMm, eo.Xs, eo.Ys, eo.Zs,
             eo.Phi * Math.PI / 180.0, eo.Omega * Math.PI / 180.0, eo.Kappa * Math.PI / 180.0,
             ground.X, ground.Y, ground.Z,
             out var x, out var y);
         return rc == 0 ? new ImagePointMm(x, y) : null;
     }
+
+    /// <summary>
+    /// 空间前方交会：由两张片的<b>绝对</b>外方位与一对同名像点，求交会点的地面坐标。
+    ///
+    /// <para>输出在数学系（X 东、Y 北、Z 天顶），与 <see cref="SolveResectionRobust"/> 解出的
+    /// 外方位同一个系，两者可以直接混用。</para>
+    ///
+    /// <para>一次只交会一个点。批量的循环与「哪些点接受」由调用方负责——这是三层职责里
+    /// 「流程控制」的位置，不在这里做。</para>
+    /// </summary>
+    /// <param name="left">左片的绝对外方位（角度为度）。</param>
+    /// <param name="right">右片的绝对外方位（角度为度）。</param>
+    /// <param name="leftMm">左片像点，像平面坐标 mm。</param>
+    /// <param name="rightMm">右片像点，像平面坐标 mm。</param>
+    /// <param name="focalLengthMm">焦距 mm。两张片共用同一个相机。</param>
+    /// <param name="imageSigmaMm">像点坐标先验中误差 mm，用于把误差传到交会点；传 0 不评精度。</param>
+    public static IntersectionResult IntersectRays(
+        ExteriorOrientation left,
+        ExteriorOrientation right,
+        ImagePointMm leftMm,
+        ImagePointMm rightMm,
+        double focalLengthMm,
+        double imageSigmaMm = 0.0)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        var input = new NativeAbi.IntersectionInput
+        {
+            FocalLengthMm = focalLengthMm,
+            Left = ToPose(left),
+            Right = ToPose(right),
+            LeftXmm = leftMm.X,
+            LeftYmm = leftMm.Y,
+            RightXmm = rightMm.X,
+            RightYmm = rightMm.Y,
+            ImageSigmaMm = imageSigmaMm,
+        };
+
+        var output = new NativeAbi.IntersectionOutput();
+
+        int rc;
+        try
+        {
+            rc = NativeAbi.pgm_forward_intersection(ref input, ref output);
+        }
+        catch (DllNotFoundException)
+        {
+            return new IntersectionResult
+            {
+                ErrorCode = -1,
+                Message = "找不到 photogrammetry.dll。先运行 " +
+                          "cmake --build native/build --config Release 再重新构建托管项目。",
+            };
+        }
+        catch (BadImageFormatException)
+        {
+            return new IntersectionResult
+            {
+                ErrorCode = -1,
+                Message = "photogrammetry.dll 位数不匹配。托管进程是 x64，DLL 也必须是 x64。",
+            };
+        }
+
+        return new IntersectionResult
+        {
+            Success = rc == 0,
+            ErrorCode = rc,
+            Message = rc == 0 ? string.Empty : LastError,
+            Point = new GroundPointM(output.GroundX, output.GroundY, output.GroundZ),
+            NLeft = output.NLeft,
+            NRight = output.NRight,
+            ConvergenceAngleDeg = output.ConvergenceAngleDeg,
+            BaseLength = output.BaseLength,
+            RangeLeft = output.RangeLeft,
+            RangeRight = output.RangeRight,
+            MissDistance = output.MissDistance,
+            ResidualLeftXmm = output.ResidualLeftXmm,
+            ResidualLeftYmm = output.ResidualLeftYmm,
+            ResidualRightXmm = output.ResidualRightXmm,
+            ResidualRightYmm = output.ResidualRightYmm,
+            VerticalParallaxMm = output.VerticalParallaxMm,
+            MX = output.MX,
+            MY = output.MY,
+            MZ = output.MZ,
+        };
+    }
+
+    /// <summary>外方位元素（角度为度）→ 原生侧的姿态（角度为弧度）。</summary>
+    private static NativeAbi.CameraPose ToPose(ExteriorOrientation eo) => new()
+    {
+        Xs = eo.Xs,
+        Ys = eo.Ys,
+        Zs = eo.Zs,
+        PhiRad = eo.Phi * Math.PI / 180.0,
+        OmegaRad = eo.Omega * Math.PI / 180.0,
+        KappaRad = eo.Kappa * Math.PI / 180.0,
+    };
 
     private static IntPtr Alloc(double[] values)
     {

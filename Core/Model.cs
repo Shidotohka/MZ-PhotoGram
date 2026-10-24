@@ -84,6 +84,12 @@ public sealed class ImageItem
     public ExteriorOrientation? Exterior { get; set; }
     public ImageStatus Status { get; set; } = ImageStatus.NotProcessed;
 
+    /// <summary>
+    /// 后方交会判定出的地面轴序。只用于显示时的换轴换算，<b>不写盘</b>——
+    /// 它是从观测数据反推出来的结论，不是输入。没做过后方交会时为 null。
+    /// </summary>
+    public GroundAxisOrder? GroundOrder { get; set; }
+
     /// <summary>所属相机。未指定时无法做框标内定向。</summary>
     public string? CameraId { get; set; }
 

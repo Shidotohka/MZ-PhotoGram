@@ -136,6 +136,7 @@ public partial class MainWindow
         // 切到另一张影像，「本片」列与可解算点数都要跟着变
         RefreshPointTable();
         UpdateResectionPanel();
+        if (_moduleName == "前方交会") UpdateIntersectionPanel();
     }
 
 }

@@ -102,9 +102,13 @@ public partial class MainWindow
 
         var isInterior = name == "内定向";
         var isResection = name == "后方交会";
+        var isIntersection = name == "前方交会";
         InteriorPanel.Visibility = isInterior ? Visibility.Visible : Visibility.Collapsed;
         ResectionPanel.Visibility = isResection ? Visibility.Visible : Visibility.Collapsed;
-        GenericTaskPanel.Visibility = isInterior || isResection ? Visibility.Collapsed : Visibility.Visible;
+        IntersectionPanel.Visibility = isIntersection ? Visibility.Visible : Visibility.Collapsed;
+        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
         if (isInterior)
         {
@@ -128,6 +132,10 @@ public partial class MainWindow
 
         RefreshPointTable();
         if (isResection) UpdateResectionPanel();
+
+        // 离开前方交会就把配对清掉：留着两个临时像点却不在这个模块，谁也说不清它们是什么
+        if (isIntersection) UpdateIntersectionPanel();
+        else ClearIntersectionPair();
     }
 
 }

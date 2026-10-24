@@ -306,6 +306,9 @@ public partial class MainWindow : Window
 
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
+        // 前方交会靠「选中了哪个窗的哪个点」来配对，所以每次选中变化都要过一遍
+        HandleIntersectionPick();
+
         var point = Workspace.SelectedPoint;
         UpdateStatusCounts();
 

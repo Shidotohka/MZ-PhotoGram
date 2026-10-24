@@ -18,16 +18,17 @@ src/
 │   ├── FiducialEditorWindow.xaml(.cs)  框标坐标的手工录入与改正
 │   ├── Services/
 │   │   └── ImageLibrary.cs           影像解码与缓存（只管路径 → 冻结位图）
-│   └── MainWindow/                五区骨架，按职责拆成 8 个 partial
+│   └── MainWindow/                五区骨架，按职责拆成 9 个 partial
 │       ├── MainWindow.xaml          界面骨架（StartupUri 指向这里）
-│       ├── MainWindow.xaml.cs       394 行　外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
+│       ├── MainWindow.xaml.cs       397 行　外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
 │       ├── MainWindow.Interior.cs   542 行　内定向（含框标表的行类型）
 │       ├── MainWindow.Gcp.cs        514 行　控制点、刺点、放大影像
+│       ├── MainWindow.Intersection.cs 250 行　前方交会：配对、解算、结果面板
 │       ├── MainWindow.Tree.cs       202 行　数据树
 │       ├── MainWindow.Resection.cs  161 行　后方交会（流程在 Core/Tasks，这里只剩显示）
-│       ├── MainWindow.Library.cs    141 行　影像库：添加、去重 Id、载入工作区
-│       ├── MainWindow.Modules.cs    133 行　作业方法与模块切换
-│       └── MainWindow.Tooling.cs     48 行　给 Snap 的 8 个 internal 入口登记表
+│       ├── MainWindow.Library.cs    142 行　影像库：添加、去重 Id、载入工作区
+│       ├── MainWindow.Modules.cs    141 行　作业方法与模块切换
+│       └── MainWindow.Tooling.cs     48 行　给 Snap 的 9 个 internal 入口登记表
 ├── Core/                           数据适配与流程控制（不含任何界面依赖，也不含平差计算）
 │   ├── Coordinates.cs              四种坐标类型 + 像素↔像平面换算 + 地面轴序（手性判定、换轴）
 │   ├── Model.cs                    工程实体：相机 / 框标 / 影像 / 控制点 / 像点 / 像对 / 模型 / 结果
@@ -37,9 +38,11 @@ src/
 │   ├── RtfText.cs                  RTF 取纯文本（够用的一档，不追求完整规范）
 │   ├── ZoomImageIndex.cs           放大影像（点之记）目录发现与按点号取图
 │   ├── FiducialHelper.cs           框标方位描述与对称性判断
-│   ├── NativeAlgorithms.cs         原生算法的 P/Invoke 封装 + 数据适配（判手性、换轴、结果过闸门）
+│   ├── NativeAbi.cs                photogrammetry.dll 的托管侧 ABI：结构体布局 + DllImport，不含策略
+│   ├── NativeAlgorithms.cs         原生算法的调用封装 + 数据适配（判手性、换轴、结果过闸门）
 │   └── Tasks/
-│       └── ResectionTask.cs        后方交会流程：收集观测 → 判手性 → 换轴 → 解算 → 写回，无界面依赖
+│       ├── ResectionTask.cs        后方交会流程：收集观测 → 判手性 → 换轴 → 解算 → 写回，无界面依赖
+│       └── IntersectionTask.cs     前方交会流程：查两张片的可用性 → 像素换像平面 → 交会 → 过闸门
 └── Snap/                           开发工具：离屏渲染与自检（不参与解决方案构建）
 ```
 
@@ -84,8 +87,9 @@ dotnet build src/PhotogrammetryWorkbench.sln -c Debug -m:1
 
 **进度以 [Docs/路线图.md](../Docs/路线图.md) 为唯一真源。**
 
-M1–M4 完成，M5 的前方交会 DLL 与七段验收完成，界面已按三种作业方法分流。
-当前阶段是**结构重构**，期间不进新功能——计划与回归基线见[重构计划](../Docs/重构计划.md)。
+M1–M4 完成，M5 完成（DLL + 托管层 + 界面面板），界面已按三种作业方法分流。
+**结构重构的六步已全部完成**，每步都要求回归基线逐字不变、截图逐字节相同——
+计划、分步记录与验收基线见[重构计划](../Docs/重构计划.md)。
 
 内定向的验收是在真实航摄数据上做的：E-FOTO Hammer 两片各点 8 个框标，δ 相差 0.004%，σ₀ 0.012–0.020 mm。基准见 [Data/real/README.md](../Data/real/README.md)。
 
@@ -130,7 +134,11 @@ dotnet run --project src/Snap/Snap.csproj -c Debug -- --out out.png --module 后
 | `--image` `--loadsecond` `--zoom` `--points` | 视窗内容与缩放 |
 | `--project` `--gcp` `--camera` | 载入工程 / 控制点 / 相机文件 |
 | `--openmenu` `--tab` | 展开某个菜单、切底部页签 |
-| `--selftest` `--probe` `--control` `--fiducial` | 四套自检，不截图 |
+| `--selftest` `--probe` `--control` `--fiducial` `--intersect` | 五套自检，不截图 |
+| `--abi` | 打印 ABI 布局：每个结构体的尺寸、字段顺序与偏移，以及全部 DllImport 签名 |
+| `--intersect-demo` | 界面端到端：给两张片装上一组已知外方位，各点一个同名点，按解算并检查面板（配合 `--image` + `--loadsecond`） |
+
+**动过 `NativeAbi.cs` 就必须跑 `--abi` 并跟改前对表。**封送布局错一个字段（类型、顺序、`SizeConst`）不会编译报错，只会静默算错。改前改后各存一份输出，把 `declaring=` 那一列剥掉再比——它只会因为类型换了宿主而变。
 
 改过 `App` 之后必须重新构建 `Snap`，否则跑的还是旧 DLL——`--no-build` 不会把新的 `App.dll` 复制过去，症状是**截图还是旧界面，而且不报错**。
 

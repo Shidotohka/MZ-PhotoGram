@@ -452,6 +452,40 @@
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
                                     </StackPanel>
 
+                                    <!-- 前方交会 -->
+                                    <StackPanel x:Name="IntersectionPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock x:Name="IntersectionHint" FontSize="11"
+                                                   Foreground="{StaticResource DimBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <Border Background="{StaticResource PanelBrush}"
+                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
+                                            <TextBlock x:Name="IntersectionPairText" Text="左片 —　右片 —"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       Foreground="{StaticResource DimBrush}"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <Button x:Name="IntersectionSolveButton" Content="解算交会点"
+                                                Click="SolveIntersection_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+
+                                        <Border Background="{StaticResource PanelBrush}"
+                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
+                                            <TextBlock x:Name="IntersectionResultText" Text="尚未解算"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       Foreground="{StaticResource DimBrush}"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <Button Content="清空配对" Click="ClearIntersectionPair_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+                                    </StackPanel>
+
                                     <!-- 其他模块的占位 -->
                                     <StackPanel x:Name="GenericTaskPanel" Margin="0,8,0,0">
                                         <Grid>
