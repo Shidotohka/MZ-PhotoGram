@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Photogrammetry.App</RootNamespace>
+    <AssemblyName>Photogrammetry.App</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Core\Core.csproj" />
+  </ItemGroup>
+
+  <!-- 离屏渲染工具 Snap 要重放界面，用到 MainWindow 的 internal 入口。
+       这些入口的清单与用途见 MainWindow/MainWindow.Tooling.cs。 -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Snap</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>
