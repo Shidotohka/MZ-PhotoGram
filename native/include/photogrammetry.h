@@ -228,6 +228,79 @@ typedef struct pgm_intersection_output
     double m_x, m_y, m_z;           /* 交会点中误差，单位同地面坐标 */
 } pgm_intersection_output;
 
+/* ------------------------------------------------------------ 相对定向 */
+
+/*
+ * 相对定向的输入：若干同名点对。像平面坐标单位 mm，原点像主点，x 向右、y 向上，
+ * 已由内定向换算并做畸变改正，与 pgm_resection / pgm_forward_intersection 同一定义。
+ *
+ * count 至少 5（5 个未知数）；给 6 才有 1 个多余观测，才谈得上 σ0。
+ *
+ * image_sigma_mm 是像点坐标的先验中误差，用于粗差门槛 3σ；传 0 表示不知道，此时
+ * 门槛取 3σ0 与 0.01 mm 中的大者（无噪声数据 σ0 = 0，不能拿 0 当门槛）。
+ *
+ * max_iterations <= 0 取 50；tolerance <= 0 取 1e-10（对归一化后的改正数）。
+ */
+typedef struct pgm_relative_orientation_input
+{
+    int32_t       count;
+    const double* left_x_mm;
+    const double* left_y_mm;
+    const double* right_x_mm;
+    const double* right_y_mm;
+    double        focal_length_mm;
+
+    double        image_sigma_mm;
+    int32_t       max_iterations;
+    double        tolerance;
+} pgm_relative_orientation_input;
+
+/*
+ * 相对定向的输出：5 个相对方位元素 + 模型比例尺 + 精度 + 上下视差。
+ *
+ * 坐标系：像空间辅助坐标系，原点在左片摄影中心、三轴平行于左片像空间系。基线
+ * b_* 是单位方向（|b| = 1），模型比例尺由它规定——b 的长度是自由网的规准，绝对
+ * 定向的 λ 再把它拉回米制，所以别把模型坐标当米制坐标用。
+ *
+ * 三个角是右片相对左片，按 R = R_kappa * R_omega * R_phi 分解，与 pgm_resection
+ * 的输出同一约定。rotation 是把辅助系方向转到像空间的 3x3（行主序），可以连基线
+ * 一起当成一组外方位元素喂给 pgm_forward_intersection 求模型坐标：
+ *     左片 (0,0,0,0,0,0)，右片 (b_x,b_y,b_z,phi,omega,kappa)
+ *
+ * q_* 是上下视差：把右片射线按 w 归一后投回与左片平行的像平面，q = y_左 - y_右。
+ * 定向正确且无观测误差时应为零，单位 mm。q_rms_mm 就是 M6 的验收指标；sigma0_mm
+ * 是解算的单位权中误差（同一量纲），两者应当接近。
+ *
+ * 退出码：PGM_ERR_TOO_FEW_POINTS（少于 5 对）、PGM_ERR_DEGENERATE（平均视差为零、
+ * 法方程秩亏、迭代发散）、PGM_ERR_NOT_CONVERGED（到上限未收敛，out 中是最后一次
+ * 迭代值，不要当结果用）。其余错误码下 out 只保证被清零。
+ */
+typedef struct pgm_relative_orientation_output
+{
+    double b_x, b_y, b_z;               /* 单位基线方向，|b| = 1 */
+    double phi_rad, omega_rad, kappa_rad;
+    double phi_deg, omega_deg, kappa_deg;
+    double rotation[9];
+
+    int32_t gauge;                      /* 实际冻结的基线分量：0 = u, 1 = v, 2 = w */
+    int32_t iterations;
+    int32_t used_count;                 /* 实际参与解算的点对数 */
+    int32_t rejected_count;             /* 被判为粗差剔掉的点对数 */
+    int32_t redundancy;                 /* used_count - 5 */
+
+    double sigma0_mm;                   /* 单位权中误差，mm */
+    double q_rms_mm;                    /* 上下视差 RMS，mm */
+    double q_max_abs_mm;
+    double condition;                   /* 法方程条件数 λmax/λmin */
+
+    /* 逐点上下视差，mm，被剔除的点也给值仅供参考。调用方预分配 count 个；
+       不需要时置 NULL。 */
+    double*  residual_q_mm;
+    /* 逐点 1 = 参与解算，0 = 被当粗差剔除。调用方预分配 count 个；
+       不需要时置 NULL。 */
+    int32_t* used_flags;
+} pgm_relative_orientation_output;
+
 /* ------------------------------------------------------------ 函数 */
 
 /* 六参数仿射最小二乘。成功返回 PGM_OK 并填满 out（含残差，若提供了缓冲区）。 */
@@ -252,6 +325,35 @@ PGM_API int32_t pgm_resection(const pgm_resection_input*  in,
  */
 PGM_API int32_t pgm_forward_intersection(const pgm_intersection_input*  in,
                                          pgm_intersection_output*       out);
+
+/*
+ * 相对定向：共面条件方程 + 迭代最小二乘，解 5 个相对方位元素。
+ *
+ * 不用任何地面坐标，约束完全来自内部几何（同名光线对对相交）。成功返回 PGM_OK；
+ * 返回 PGM_ERR_NOT_CONVERGED 时 out 已填满，但那是最后一次迭代值，不是解。
+ */
+PGM_API int32_t pgm_relative_orientation(const pgm_relative_orientation_input*  in,
+                                         pgm_relative_orientation_output*       out);
+
+/*
+ * 诊断用：在给定的基线分量与姿态处输出共面条件的误差方程。
+ *
+ * out_a 每点 6 个系数，列序为 b_u, b_v, b_w, alpha, beta, gamma（后三个是绕辅助系
+ * u/v/w 轴的小旋转）；out_f 是共面条件的残差。rotation 是"辅助系方向 -> 像点方向"
+ * 的 3x3 行主序，与 pgm_relative_orientation 输出的 rotation 同一约定。
+ *
+ * 提供给自检程序做有限差分对表，正常解算流程不需要调用。
+ */
+PGM_API int32_t pgm_relative_orientation_design(int32_t       count,
+                                                const double* left_x_mm,
+                                                const double* left_y_mm,
+                                                const double* right_x_mm,
+                                                const double* right_y_mm,
+                                                double        focal_length_mm,
+                                                double        b_u, double b_v, double b_w,
+                                                const double* rotation,
+                                                double*       out_a,
+                                                double*       out_f);
 
 /*
  * 共线条件方程的正算：由外方位元素把地面点投影到像平面坐标（mm）。
