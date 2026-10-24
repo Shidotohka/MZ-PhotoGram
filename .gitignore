@@ -1,0 +1,44 @@
+# 仓库根：摄影测量工作台。src/ 与 native/ 各自带完整历史并入本库。
+# 子目录里原有的 .gitignore 继续生效（src/.gitignore、native/.gitignore）。
+
+# ===== 构建输出 =====
+/build/
+**/bin/
+**/obj/
+**/publish/
+**/Publish/
+*.pdb
+*.exp
+*.ilk
+*.obj
+*.cache
+
+# ===== Visual Studio / VS Code =====
+.vs/
+*.suo
+*.user
+*.rsuser
+*.userosscache
+*.VC.db
+*.sdf
+*.opensdf
+*.ipch
+# 共享配置时要提交它，就把下面这行注释掉（与 src/.gitignore 的取舍一致）
+.vscode/
+
+# ===== 日志与临时 =====
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== 目录树生成文件；要提交就删掉这一行 =====
+/tree.txt
+
+# ===== 迁移期的仓库备份（bundle + 旧 .git）。确认无误后可整个删掉 =====
+/.git-backup/
