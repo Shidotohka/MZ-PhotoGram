@@ -1,8 +1,6 @@
 using System;
 using System.Linq;
-using System.Text;
 using System.Windows;
-using System.Windows.Controls;
 using Photogrammetry.Core;
 using Photogrammetry.Core.Tasks;
 
@@ -92,12 +90,9 @@ public partial class MainWindow
 
             case ResectionFailure.Solver:
                 var rejected = run.Result!;
-                ResectionResultText.Foreground = ErrBadge;
-                ResectionResultText.Text = $"未采用（rc = {rejected.ErrorCode}）\n{rejected.Message}\n\n" +
-                                           "诊断值（不要当作结果）：\n" +
-                                           $"Xs {rejected.Xs:0.0}　Ys {rejected.Ys:0.0}　Zs {rejected.Zs:0.0} m\n" +
-                                           $"φ {rejected.PhiDeg:+0.0;-0.0}°　ω {rejected.OmegaDeg:+0.0;-0.0}°　" +
-                                           $"κ {rejected.KappaDeg:+0.0;-0.0}°\nσ₀ {rejected.Sigma0Mm:0.0000} mm";
+
+                // 数值照给，但每一行都标成诊断值：没见过失败结果的人最容易把它当解
+                ShowResult(ResectionDiagnostic(CurrentImage, rejected));
                 DiagSummary.Text = "✗ " + run.Message;
                 DiagSummary.Foreground = ErrBadge;
                 return rejected;
@@ -105,57 +100,19 @@ public partial class MainWindow
 
         var result = run.Result!;
         var image = CurrentImage!;
+        var evidence = run.Evidence!;
 
-        // 上一次失败会把文字染红，成功后要还原成继承来的颜色，否则红色会一直留着
-        ResectionResultText.ClearValue(TextBlock.ForegroundProperty);
-        ResectionResultText.Text = FormatResection(result) +
-                                   $"\n{run.Evidence!.Describe()}\n" +
-                                   "外方位 X/Y 在数学系里（X 东、Y 北）。";
-        ResPanelText.Text = FormatResidualTable(image.Id, result);
+        // 外方位与逐点残差进「结果残差」页；轴序证据跟着结果一起摆，免得外方位正负被误读
+        ShowResult(ResectionResult(image, result, evidence));
 
         DiagSummary.Text = $"✓ 后方交会完成：迭代 {result.Iterations} 次，σ₀ = " +
                            $"{result.Sigma0Mm:0.0000} mm，摄影距离约 {result.MeanRangeM:0} m，" +
-                           $"{GroundAxes.Describe(run.Evidence.Order)}";
+                           $"{GroundAxes.Describe(evidence.Order)}";
         DiagSummary.Foreground = OkBadge;
 
-        ResTab.IsChecked = true;
         RefreshPointTable();
         UpdateStatusCounts();
         RefreshTree();
         return result;
-    }
-
-    private static string FormatResection(ResectionResult r) =>
-        $"Xs = {r.Xs:0.000} m\n" +
-        $"Ys = {r.Ys:0.000} m\n" +
-        $"Zs = {r.Zs:0.000} m\n" +
-        $"φ = {r.PhiDeg:+0.000000;-0.000000}°\n" +
-        $"ω = {r.OmegaDeg:+0.000000;-0.000000}°\n" +
-        $"κ = {r.KappaDeg:+0.000000;-0.000000}°\n" +
-        $"σ₀ = {r.Sigma0Mm:0.0000} mm　迭代 {r.Iterations} 次\n" +
-        $"m_Xs = {r.MXs:0.000} m　m_Ys = {r.MYs:0.000} m　m_Zs = {r.MZs:0.000} m";
-
-    /// <summary>残差表，进「结果残差」页。</summary>
-    private static string FormatResidualTable(string imageId, ResectionResult result)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"影像 {imageId}　后方交会　多余观测 {result.Redundancy}　" +
-                      $"σ₀ = {result.Sigma0Mm:0.0000} mm　条件数 {result.Condition:0.#}");
-        sb.AppendLine($"外方位　Xs = {result.Xs:0.000} m　Ys = {result.Ys:0.000} m　Zs = {result.Zs:0.000} m");
-        sb.AppendLine($"　　　　φ = {result.PhiDeg:+0.000000;-0.000000}°　ω = {result.OmegaDeg:+0.000000;-0.000000}°　" +
-                      $"κ = {result.KappaDeg:+0.000000;-0.000000}°");
-        sb.AppendLine();
-        sb.AppendLine("点号        Vx(mm)     Vy(mm)     |V|(mm)   |V|/σ₀");
-        foreach (var r in result.Residuals)
-        {
-            var norm = Math.Sqrt(r.VxMm * r.VxMm + r.VyMm * r.VyMm);
-            var ratio = result.Sigma0Mm > 0 ? norm / result.Sigma0Mm : 0;
-
-            // σ₀ 本身会被粗差抬高，所以 3 倍是个偏松的门槛；但它能让人一眼看到"哪个点不对劲"
-            sb.AppendLine($"{r.GcpId,-8} {r.VxMm,10:+0.0000;-0.0000} {r.VyMm,10:+0.0000;-0.0000} " +
-                          $"{norm,10:0.0000} {ratio,8:0.00}{(ratio > 3 ? "   ← 偏大" : "")}");
-        }
-
-        return sb.ToString();
     }
 }

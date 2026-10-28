@@ -114,6 +114,7 @@ public partial class MainWindow : Window
             RefreshTree();
             UpdateStatusCounts();
             UpdateZoomLabel();
+            ClearResult();
         };
     }
 
@@ -144,6 +145,7 @@ public partial class MainWindow : Window
         PointInfoText.Text = "未选择";
         DiagSummary.Text = "诊断 · 新建工程";
         DiagSummary.Foreground = DimBadge;
+        ClearResult();
     }
 
     private void SaveProjectAs_Click(object sender, RoutedEventArgs e)
@@ -189,6 +191,7 @@ public partial class MainWindow : Window
             RefreshTree();
             UpdateStatusCounts();
             UpdateProjectTitle();
+            ClearResult();
 
             var missing = project.Images.Count(i => i.FileState == ImageFileState.Missing);
             DiagSummary.Text = missing > 0
@@ -300,7 +303,7 @@ public partial class MainWindow : Window
 
         var pixel = $"px {e.Pixel.I}, {e.Pixel.J}";
         StatusCursor.Text = e.ImageMm is { } mm
-            ? $"{pixel}  ·  mm {mm.X:0.00}, {mm.Y:+0.00;-0.00}"
+            ? $"{pixel}  ·  mm {Format.Fixed(mm.X, "0.00")}, {Format.Signed(mm.Y, "0.00")}"
             : pixel;
     }
 

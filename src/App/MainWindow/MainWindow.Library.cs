@@ -112,7 +112,7 @@ public partial class MainWindow
     {
         var interior = item.Interior is { } io
             ? $"内方位：f {io.FocalLength:0.###} mm · δ {io.PixelSizeMm:0.000000} mm/px\n" +
-              $"x0 {io.X0:+0.0000;-0.0000} · y0 {io.Y0:+0.0000;-0.0000} mm"
+              $"x0 {Format.Signed(io.X0, "0.0000")} · y0 {Format.Signed(io.Y0, "0.0000")} mm"
             : "内方位元素：未设置";
 
         ImageInfoText.Text = $"{item.Id}\n{item.Width} × {item.Height} px\n{interior}";

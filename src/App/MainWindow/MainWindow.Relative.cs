@@ -57,8 +57,7 @@ public partial class MainWindow
             };
         }
 
-        private static string Fmt(double v) =>
-            v.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture);
+        private static string Fmt(double v) => Format.Signed(v, "0.0000");
 
         /// <summary>像点 → 像平面坐标。没内定向时给 null，表里显示「—」而不是假的 0。</summary>
         private static ImagePointMm? MmOf(ImageItem? image, ImagePoint? point)
@@ -399,7 +398,7 @@ public partial class MainWindow
 
     private void SolveRelative_Click(object sender, RoutedEventArgs e) => SolveRelativeNow();
 
-    /// <summary>跑一次相对定向并把结果摆到面板上。</summary>
+    /// <summary>跑一次相对定向，把结果摆到「结果残差」页。</summary>
     internal RelativeRun SolveRelativeNow()
     {
         var (left, right) = RelativeImages();
@@ -407,64 +406,33 @@ public partial class MainWindow
 
         if (!run.Success)
         {
-            RelativeResultText.Foreground = ErrBadge;
-            RelativeResultText.Text = "未解出：\n" + run.Message;
+            ShowResult(FailTable($"相对定向 · {left?.Id ?? "—"} → {right?.Id ?? "—"}", run.Message));
             DiagSummary.Text = "✗ " + run.Message;
             DiagSummary.Foreground = ErrBadge;
             return run;
         }
 
-        var text = FormatRelative(run);
+        var table = RelativeResultTable(run);
 
         if (run.Warnings.Count > 0)
         {
-            RelativeResultText.Foreground = WarnBadge;
-            text += "\n\n" + string.Join("\n", run.Warnings.Select(w => "⚠ " + w));
+            table.Note = string.Join("\n", run.Warnings.Select(w => "⚠ " + w));
+            table.NoteWarn = true;
             DiagSummary.Text = $"! 相对定向完成，但有 {run.Warnings.Count} 条提醒";
             DiagSummary.Foreground = WarnBadge;
         }
         else
         {
-            RelativeResultText.ClearValue(TextBlock.ForegroundProperty);
             DiagSummary.Text = $"✓ 相对定向完成：{run.Result!.Iterations} 轮，" +
                                $"q 中误差 {run.Result.QRmsMm:0.0000} mm";
             DiagSummary.Foreground = OkBadge;
         }
 
-        RelativeResultText.Text = text;
-        RelativeResultText.BringIntoView();
+        ShowResult(table);
 
         RefreshTieTable();
         UpdateRelativePanel();
         RefreshTree();
         return run;
     }
-
-    /// <summary>把结果排成面板上的那块等宽文字。基线按单位方向给，教材式另算一行。</summary>
-    private static string FormatRelative(RelativeRun run)
-    {
-        var r = run.Result!;
-
-        var sb = new StringBuilder();
-        sb.AppendLine("相对方位元素（辅助系：原点在基准片摄影中心，三轴与它平行）");
-        sb.AppendLine($"  基线 b   {r.Bx:+0.0000000;-0.0000000}  {r.By:+0.0000000;-0.0000000}  " +
-                      $"{r.Bz:+0.0000000;-0.0000000}　|b| = 1");
-        sb.AppendLine($"  基准片   {run.Left?.Id}");
-        sb.AppendLine($"  φ₂ {r.PhiDeg:+0.0000;-0.0000}°　ω₂ {r.OmegaDeg:+0.0000;-0.0000}°　" +
-                      $"κ₂ {r.KappaDeg:+0.0000;-0.0000}°");
-        sb.AppendLine($"  冻结     {NameOfGauge(r.Gauge)}（这一分量恒等于基线主分量）");
-        sb.AppendLine($"  q 中误差 {r.QRmsMm:0.0000} mm　最大 |q| {r.QMaxAbsMm:0.0000} mm　" +
-                      $"σ₀ {r.Sigma0Mm:0.0000} mm");
-        sb.Append($"{r.Iterations} 轮　{r.UsedCount}/{run.Pairs.Count} 对参与（剔除 {r.RejectedCount}）　" +
-                  $"条件数 {r.Condition:0.0E+0}");
-
-        return sb.ToString();
-    }
-
-    private static string NameOfGauge(int gauge) => gauge switch
-    {
-        1 => "b_y",
-        2 => "b_z",
-        _ => "b_x",
-    };
 }

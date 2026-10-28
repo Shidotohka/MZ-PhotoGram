@@ -141,12 +141,6 @@ public partial class MainWindow
             _interPicking = false;
         }
 
-        if (IntersectionResultText is not null)
-        {
-            IntersectionResultText.ClearValue(TextBlock.ForegroundProperty);
-            IntersectionResultText.Text = "尚未解算";
-        }
-
         UpdateIntersectionPanel();
     }
 
@@ -183,66 +177,32 @@ public partial class MainWindow
 
         if (!run.Success)
         {
-            IntersectionResultText.Foreground = ErrBadge;
-            IntersectionResultText.Text = "未解出：\n" + run.Message;
+            ShowResult(FailTable(
+                $"前方交会 · {_interLeftImage?.Id ?? "—"} / {_interRightImage?.Id ?? "—"}", run.Message));
             DiagSummary.Text = "✗ " + run.Message;
             DiagSummary.Foreground = ErrBadge;
             return run;
         }
 
         var result = run.Result!;
-        var text = FormatIntersection(run);
+        var table = IntersectionResult(run);
 
         if (run.Warnings.Count > 0)
         {
-            IntersectionResultText.Foreground = WarnBadge;
-            text += "\n\n" + string.Join("\n", run.Warnings.Select(w => "⚠ " + w));
+            table.Note = string.Join("\n", run.Warnings.Select(w => "⚠ " + w));
+            table.NoteWarn = true;
             DiagSummary.Text = $"! 交会完成，但有 {run.Warnings.Count} 条提醒";
             DiagSummary.Foreground = WarnBadge;
         }
         else
         {
-            IntersectionResultText.ClearValue(TextBlock.ForegroundProperty);
             DiagSummary.Text = $"✓ 前方交会完成：交会角 {result.ConvergenceAngleDeg:0.00}°，" +
                                $"m_XY {Math.Max(result.MX, result.MY):0.000} m、m_Z {result.MZ:0.000} m";
             DiagSummary.Foreground = OkBadge;
         }
 
-        IntersectionResultText.Text = text;
-
-        // 右栏是可滚动的，结果框常常在折叠线以下。解完把它滚出来，否则等于没显示。
-        IntersectionResultText.BringIntoView();
+        ShowResult(table);
         return run;
-    }
-
-    private static string FormatIntersection(IntersectionRun run)
-    {
-        var r = run.Result!;
-        var p = r.Point;
-
-        var sb = new StringBuilder();
-        sb.AppendLine("交会点（数学系：X 东、Y 北、Z 天顶）");
-        sb.AppendLine($"  X = {p.X,14:0.000} m");
-        sb.AppendLine($"  Y = {p.Y,14:0.000} m");
-        sb.AppendLine($"  Z = {p.Z,14:0.000} m");
-
-        // 控制点文件若是 X 指北（左手系写法），上面的 X/Y 与文件里对不上。
-        // 两张片的轴序判定一致时才给换算，否则宁可不给，免得给错。
-        if (run.Left?.GroundOrder == GroundAxisOrder.NorthEast &&
-            run.Right?.GroundOrder == GroundAxisOrder.NorthEast)
-        {
-            sb.AppendLine("按控制点文件轴序（X 指北、Y 指东）：");
-            sb.AppendLine($"  X = {p.Y,14:0.000} m");
-            sb.AppendLine($"  Y = {p.X,14:0.000} m");
-            sb.AppendLine($"  Z = {p.Z,14:0.000} m");
-        }
-
-        sb.AppendLine($"交会角 {r.ConvergenceAngleDeg:0.00}°　基线 {r.BaseLength:0.000} m");
-        sb.AppendLine($"摄影距离 {r.RangeLeft:0.0} / {r.RangeRight:0.0} m");
-        sb.AppendLine($"上下视差 {r.VerticalParallaxMm:+0.0000;-0.0000} mm　交会差 {r.MissDistance:0.000} m");
-        sb.AppendLine($"m_X {r.MX:0.000}　m_Y {r.MY:0.000}　m_Z {r.MZ:0.000} m");
-        sb.Append($"投影系数 N 左 {r.NLeft:0.0000}　N 右 {r.NRight:0.0000}");
-        return sb.ToString();
     }
 
     private static ImagePixel? PixelOf(ImagePoint? point) =>

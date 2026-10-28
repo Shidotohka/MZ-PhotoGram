@@ -264,6 +264,13 @@ internal static class Program
             Pump(win);
         }
 
+        // 内定向的界面端到端：填框标量测 → 按「解算内定向」→ 看结果页上有没有那几行
+        if (args.Any(a => string.Equals(a, "--interior-demo", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunInteriorDemo(win, Get(args, "--camera"));
+            Pump(win);
+        }
+
         if (Get(args, "--tab") is { } tabName && FindRadio(win, tabName) is { } tab)
         {
             tab.IsChecked = true;
@@ -918,6 +925,115 @@ internal static class Program
     /// 然后走界面上的解算流程，检查能否把外方位反解回来、σ₀ 是否为 0。
     /// </summary>
     /// <summary>
+    /// 内定向的界面端到端：按一份<b>已知</b>内参把相机框标反算成像素、填进框标量测，
+    /// 再按界面上那个「解算内定向」按钮，最后看「结果残差」页上列出来的东西对不对。
+    ///
+    /// <para>已知内参是临时定的（δ 按"框标铺满画幅 90%"算），因为这一条测的是
+    /// <b>按钮 → 解算 → 结果页</b>这条线接不接得上，不是内定向数学本身——
+    /// 那个由 <c>--fiducial</c> 对着 <c>Data/sim/m2</c> 的真值验。填进去的三个数
+    /// 解完应当原样回来，这顺带说明界面显示的确实是解算值。</para>
+    /// </summary>
+    private static void RunInteriorDemo(MainWindow win, string? cameraFile)
+    {
+        Console.WriteLine("\n内定向界面端到端─────────────────────────────────────");
+
+        if (cameraFile is null)
+        {
+            Console.WriteLine("[FAIL] 需要 --camera 相机检校文件");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var ws = FindChild<ImageWorkspace>(win);
+        var view = ws?.VisibleViews().FirstOrDefault(v => v.HasImage);
+        if (view?.Image is not { } image)
+        {
+            Console.WriteLine("[FAIL] 需要 --image，并把影像载入工作区");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var camera = CameraFile.Load(Path.GetFullPath(cameraFile));
+        if (!camera.HasEnoughFiducials)
+        {
+            Console.WriteLine($"[FAIL] 相机 {camera.Id} 只有 {camera.Fiducials.Count} 个框标");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        // 缩略图与原始片的像元尺寸不同：按"最外的框标落在画幅 90% 内"定 δ，
+        // 再给一点主点偏移，解出来要原样回到这三个数
+        var halfSpan = camera.Fiducials.Max(f => Math.Max(Math.Abs(f.Xmm), Math.Abs(f.Ymm)));
+        var delta = 2 * halfSpan / (0.9 * Math.Min(image.Width, image.Height));
+        const double x0 = 0.012;
+        const double y0 = -0.009;
+
+        image.FiducialMarks.Clear();
+        foreach (var f in camera.Fiducials)
+        {
+            image.FiducialMarks.Add(new FiducialMark
+            {
+                FiducialId = f.Id,
+                I = (f.Xmm + x0) / delta + image.Width / 2.0,
+                J = -(f.Ymm + y0) / delta + image.Height / 2.0,
+            });
+        }
+
+        Console.WriteLine($"  相机 {camera.Id}　框标 {camera.Fiducials.Count} 个　" +
+                          $"影像 {image.Width}×{image.Height}　填进去 δ={delta:0.000000} mm/px、" +
+                          $"x0={x0:0.000}、y0={y0:0.000}");
+
+        // 走界面上的那个按钮，不另开入口
+        if (FindButton(win, "解算内定向") is not { } solveButton)
+        {
+            Console.WriteLine("[FAIL] 找不到「解算内定向」按钮");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        solveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Pump(win);
+
+        var panel = win.SnapshotResult();
+        var names = panel.Items.Select(r => r.Name).ToList();
+        var shown = panel.Title.Contains("内定向") && names.Contains("像元尺寸") &&
+                    names.Contains("主点 x") && panel.Rows.Count == camera.Fiducials.Count;
+        Console.WriteLine(shown
+            ? $"[PASS] 结果页：{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差"
+            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
+              $"残差={panel.Rows.Count}（应有 {camera.Fiducials.Count}）");
+        if (!shown) Environment.ExitCode = 1;
+
+        // 显示出来的三个数必须就是解出来的，不能是"按进去的数重新写了一遍"
+        static double ValueOf(IReadOnlyList<MainWindow.ResultRow> items, string symbol) =>
+            double.TryParse(items.FirstOrDefault(r => r.Symbol == symbol)?.Value,
+                NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
+                ? v
+                : double.NaN;
+
+        var dDelta = Math.Abs(ValueOf(panel.Items, "δ") - delta);
+        var dX0 = Math.Abs(ValueOf(panel.Items, "x₀") - x0);
+        var dY0 = Math.Abs(ValueOf(panel.Items, "y₀") - y0);
+        var backOk = dDelta < 1e-6 && dX0 < 1e-6 && dY0 < 1e-6;
+        Console.WriteLine(backOk
+            ? $"[PASS] δ/x0/y0 原样回来（偏差 {dDelta:E1} / {dX0:E1} / {dY0:E1}）"
+            : $"[FAIL] 回代偏差过大：δ {dDelta:E2}　x0 {dX0:E2}　y0 {dY0:E2}");
+        if (!backOk) Environment.ExitCode = 1;
+
+        var worst = panel.Rows
+            .Select(row => row.Cells.Length > 2
+                ? Math.Max(Math.Abs(double.Parse(row.Cells[1], CultureInfo.InvariantCulture)),
+                           Math.Abs(double.Parse(row.Cells[2], CultureInfo.InvariantCulture)))
+                : double.NaN)
+            .DefaultIfEmpty(0)
+            .Max();
+        Console.WriteLine(worst < 1e-6
+            ? $"[PASS] 逐点残差全为 0（最大 {worst:E1} mm）"
+            : $"[FAIL] 逐点残差最大 {worst:E3} mm，框标是精确反算的，不该有残差");
+        if (!(worst < 1e-6)) Environment.ExitCode = 1;
+    }
+
+    /// <summary>
     /// 前方交会的界面端到端：给左窗、右窗的影像装上内方位与一组已知外方位，
     /// 按几何把同一个地面点投影成两张片上的像素，走<b>视窗自己的取点路径</b>点上去，
     /// 再按「解算交会点」，检查结果与真值、以及面板上真的显示了坐标。
@@ -938,14 +1054,20 @@ internal static class Program
         }
 
         const double f = 152.72;
-        const double pixelMm = 0.04503;
-        const double h = 3000.0;
 
-        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
         var items = views.Select(v => v.Image!).ToList();
 
+        // 同一台相机、同一个 230 mm 幅面：缩略图与原始片只差采样密度。
+        // 写死 0.04503 会把缩略图当成 23 mm 幅面的超远摄镜头（视场 4°），
+        // 交会角被压到 7°，整像素量化放大成几十米——那是布景错，不是算法错。
+        var frameMm = 230.0;
+        var pixelMm = frameMm / Math.Min(items[0].Width, items[0].Height);
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
+
+        const double h = 3000.0;
+
         // 旁向重叠 30%：基线 = 短边幅面的 70%，与 --intersect 自检同一套几何
-        var swathM = items[0].Height * pixelMm / f * h;
+        var swathM = frameMm / f * h;
         var baseM = 0.70 * swathM;
 
         for (var k = 0; k < 2; k++)
@@ -962,7 +1084,8 @@ internal static class Program
             };
         }
 
-        var truth = new GroundPointM(1000, 2000 + baseM / 2, h - 2500);
+        // 交会点压在航高的 83%，与原始片的布景同一个比例
+        var truth = new GroundPointM(1000, 2000 + baseM / 2, h * 0.17);
         Console.WriteLine($"真值 {truth.X:0.000}, {truth.Y:0.000}, {truth.Z:0.000} m　" +
                           $"基线 {baseM:0} m　航高 {h:0} m");
 
@@ -994,17 +1117,45 @@ internal static class Program
 
         var result = run.Result!;
         var err = Distance(result.Point, truth);
-        Console.WriteLine($"交会 {result.Point.X:0.000}, {result.Point.Y:0.000}, {result.Point.Z:0.000} m　" +
-                          $"误差 {err:0.000} m　交会角 {result.ConvergenceAngleDeg:0.00}°");
-        Console.WriteLine(err < 1.5
-            ? "[PASS] 两张片各点一下 → 交会点回到整像素量化能解释的范围内"
-            : "[FAIL] 交会点偏差超出整像素量化能解释的范围");
 
-        var panel = win.FindName("IntersectionResultText") as TextBlock;
-        var shown = panel?.Text ?? "";
-        Console.WriteLine(shown.Contains("交会点") && shown.Contains("交会角")
-            ? "[PASS] 面板上显示了交会结果"
-            : $"[FAIL] 面板没有显示结果：[{shown}]");
+        // 门槛按"整像素量化"的量级给，不写死一个米数：每根视线差半像素，
+        // 交会角越小放大越厉害。缩略图的像元粗十倍，精度自然差十倍——那不是缺陷。
+        var perRay = 0.5 * pixelMm / f * (h - truth.Z);
+        var expected = 2 * perRay / Math.Sin(result.ConvergenceAngleDeg * Math.PI / 180);
+
+        Console.WriteLine($"交会 {result.Point.X:0.000}, {result.Point.Y:0.000}, {result.Point.Z:0.000} m　" +
+                          $"误差 {err:0.000} m　交会角 {result.ConvergenceAngleDeg:0.00}°　" +
+                          $"量化理论量级 {expected:0.000} m　像元 {pixelMm:0.000000} mm/px");
+        Console.WriteLine(err < 3 * Math.Max(expected, 0.1)
+            ? "[PASS] 两张片各点一下 → 交会点回到整像素量化能解释的范围内"
+            : $"[FAIL] 交会点偏差超过整像素量化量级的 3 倍（{err:0.000} m）");
+
+        var panel = win.SnapshotResult();
+        var names = panel.Items.Select(r => r.Name).ToList();
+        Console.WriteLine($"结果页：{panel.Title}　{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差");
+
+        var shown = panel.Title.Contains("前方交会") && names.Contains("交会角") &&
+                    panel.Rows.Count == 2;
+        Console.WriteLine(shown
+            ? $"[PASS] 结果页显示了交会元素与两行残差"
+            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 残差={panel.Rows.Count}");
+        if (!shown) Environment.ExitCode = 1;
+
+        // 界面上的数必须是解算出来的那个数，不是"看起来像"的另一个数
+        var xRow = panel.Items.FirstOrDefault(r => r.Name == "交会点 X");
+        var expectX = result.Point.X.ToString("0.000", CultureInfo.InvariantCulture);
+        var valueOk = xRow?.Value == expectX;
+        Console.WriteLine(valueOk
+            ? $"[PASS] 交会点 X 显示 {xRow!.Value} m（与解算结果一致）"
+            : $"[FAIL] 交会点 X 显示 [{xRow?.Value}]，解算结果是 {expectX}");
+        if (!valueOk) Environment.ExitCode = 1;
+
+        // 结果页在折叠线以下，解完必须自己翻出来
+        var tab = win.FindName("ResTab") as RadioButton;
+        Console.WriteLine(tab?.IsChecked == true
+            ? "[PASS] 解完自动切到「结果残差」页"
+            : "[FAIL] 没切到结果页，用户看不到结果");
+        if (tab?.IsChecked != true) Environment.ExitCode = 1;
     }
 
     /// <summary>
@@ -1150,12 +1301,25 @@ internal static class Program
             : $"[FAIL] q_rms {r.QRmsMm:0.0000} mm 偏大");
         if (r.QRmsMm >= 0.03) Environment.ExitCode = 1;
 
-        var panel = win.FindName("RelativeResultText") as TextBlock;
-        var shown = panel?.Text ?? "";
-        Console.WriteLine(shown.Contains("相对方位元素") && shown.Contains("基线 b")
-            ? "[PASS] 面板上显示了相对定向结果"
-            : $"[FAIL] 面板没有显示结果：[{shown}]");
-        if (!shown.Contains("相对方位元素")) Environment.ExitCode = 1;
+        var panel = win.SnapshotResult();
+        var names = panel.Items.Select(r => r.Name).ToList();
+        Console.WriteLine($"结果页：{panel.Title}　{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差");
+
+        var shown = panel.Title.Contains("相对定向") && names.Contains("基线") &&
+                    panel.Rows.Count == count && panel.Headers.FirstOrDefault() == "点号";
+        Console.WriteLine(shown
+            ? $"[PASS] 结果页显示了相对方位元素与 {panel.Rows.Count} 行上下视差"
+            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
+              $"残差={panel.Rows.Count} 列=[{string.Join("/", panel.Headers)}]");
+        if (!shown) Environment.ExitCode = 1;
+
+        // 逐点 q 要与解算器给出的逐点残差逐位一致（同一次解，没道理不同）
+        var expectQ = r.ResidualQ[0].ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture);
+        var shownQ = panel.Rows[0].Cells.Length > 1 ? panel.Rows[0].Cells[1] : "";
+        Console.WriteLine(shownQ == expectQ
+            ? $"[PASS] 第 1 个点的 q 显示 {shownQ} mm（与解算器一致）"
+            : $"[FAIL] 第 1 个点的 q 显示 [{shownQ}]，解算器给的是 {expectQ}");
+        if (shownQ != expectQ) Environment.ExitCode = 1;
 
         Console.WriteLine($"[PASS] 结果写进了像对：{win.CurrentProject.Pairs.Count} 个像对");
     }
@@ -1238,6 +1402,22 @@ internal static class Program
         Console.WriteLine(ok
             ? "[PASS] 刺点 → 像平面坐标 → 后方交会，外方位回到整像素量化误差以内"
             : "[FAIL] 外方位恢复误差超出整像素量化能解释的范围");
+
+        // 结果残差页：外方位六个元素 + 每个控制点一行残差
+        var panel = win.SnapshotResult();
+        var names = panel.Items.Select(r => r.Name).ToList();
+        var shownResult = panel.Title.Contains("后方交会") && names.Contains("摄影中心 X") &&
+                          names.Contains("姿态角 κ") && panel.Rows.Count == gcps.Count;
+        Console.WriteLine(shownResult
+            ? $"[PASS] 结果页：{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差"
+            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
+              $"残差={panel.Rows.Count}（应有 {gcps.Count}）");
+
+        var xsRow = panel.Items.FirstOrDefault(r => r.Name == "摄影中心 X");
+        var expectXs = solved.Xs.ToString("0.000", CultureInfo.InvariantCulture);
+        Console.WriteLine(xsRow?.Value == expectXs
+            ? $"[PASS] 摄影中心 X 显示 {xsRow!.Value} m（与解算结果一致）"
+            : $"[FAIL] 摄影中心 X 显示 [{xsRow?.Value}]，解算结果是 {expectXs}");
 
         // 截图上要看得见点表与放大影像：选中一个控制点、切回点表页
         if (gcps.Count > 0) Console.WriteLine($"选中点表行 {gcps[0].Id}: {win.SelectGcp(gcps[0].Id)}");

@@ -62,8 +62,8 @@ public partial class MainWindow
                 GcpType.Elevation => "高程点",
                 _ => "控制点"
             },
-            Xmm = here is null ? "—" : here.PositionMm.X.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
-            Ymm = here is null ? "—" : here.PositionMm.Y.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
+            Xmm = here is null ? "—" : Format.Signed(here.PositionMm.X, "0.0000"),
+            Ymm = here is null ? "—" : Format.Signed(here.PositionMm.Y, "0.0000"),
             Pixel = here is null ? "—" : $"{here.PixelX}, {here.PixelY}",
             Residual = here?.ResidualMm is { } r
                 ? r.ToString("0.0000", CultureInfo.InvariantCulture)

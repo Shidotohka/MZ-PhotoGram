@@ -204,11 +204,11 @@ public partial class MainWindow
         if (!result.Success)
         {
             var hint = result.ErrorCode == NativeAlgorithms.ErrorAxisSign
-                ? "\n\n多半是框标编号与点位对不上。\n对照上面列表里的方位（如「右下角」），逐个核对后重新点一遍。"
+                ? "多半是框标编号与点位对不上：对照点表里的方位（如「右下角」），逐个核对后重新点一遍。"
                 : string.Empty;
 
-            FiducialResultText.Text = $"解算失败（{result.ErrorCode}）\n{result.Message}{hint}";
-            FiducialResultText.Foreground = ErrBadge;
+            ShowResult(FailTable($"内定向 · {image.Id}",
+                $"（{result.ErrorCode}）{result.Message}" + (hint.Length > 0 ? "\n" + hint : "")));
             DiagSummary.Text = $"✗ 内定向失败：{result.Message}";
             DiagSummary.Foreground = ErrBadge;
             return;
@@ -224,18 +224,8 @@ public partial class MainWindow
         };
         image.Status = ImageStatus.InteriorDone;
 
-        FiducialResultText.Foreground = MutBadge;
-        FiducialResultText.Text =
-            $"δ    = {result.PixelSizeMm:0.000000} mm/px\n" +
-            $"s_x  = {result.SxMm:0.000000}   s_y = {result.SyMm:0.000000}\n" +
-            $"x0   = {result.X0Mm:+0.000000;-0.000000} mm\n" +
-            $"y0   = {result.Y0Mm:+0.000000;-0.000000} mm\n" +
-            $"主点 = {result.PrincipalI:0.00}, {result.PrincipalJ:0.00} px\n" +
-            $"σ0   = {result.Sigma0Mm:0.000000} mm   冗余 {result.Redundancy}";
-
-        ResPanelText.Text = BuildFiducialResidualTable(result);
-        ResTab.IsChecked = true;
-
+        // 结果与逐点残差进「结果残差」页，右栏不再摆结果
+        ShowResult(InteriorResult(image, result));
         var warn = result.Sigma0Mm > 0.02;
         DiagSummary.Text = warn
             ? $"! 内定向完成，但 σ0 = {result.Sigma0Mm:0.0000} mm 偏大，检查残差最大的框标"
@@ -245,26 +235,6 @@ public partial class MainWindow
         OnImageLoaded(null, image);
         OnSelectionChanged(null, EventArgs.Empty);
         RefreshTree();
-    }
-
-    private static string BuildFiducialResidualTable(FiducialOrientationResult result)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"内定向 · 框标 {result.UsedCount} 个 · 多余观测 {result.Redundancy} · " +
-                      $"σ0 = {result.Sigma0Mm:0.000000} mm · 最大残差 {result.MaxAbsResidualMm:0.000000} mm");
-        sb.AppendLine();
-        sb.AppendLine("框标        I(px)         J(px)        vx(mm)        vy(mm)");
-        sb.AppendLine(new string('-', 62));
-
-        foreach (var r in result.Residuals)
-        {
-            var id = r.Id.ToString().PadLeft(3);
-            var mark = Math.Max(Math.Abs(r.VxMm), Math.Abs(r.VyMm));
-            sb.AppendLine($"{id}   {r.VxMm,12:+0.000000;-0.000000} {r.VyMm,12:+0.000000;-0.000000}"
-                          + (mark >= 5 * result.Sigma0Mm && result.Sigma0Mm > 0 ? "   ← 偏大" : ""));
-        }
-
-        return sb.ToString();
     }
 
     private int? NextMissingFiducial(ImageItem image)
@@ -397,8 +367,8 @@ public partial class MainWindow
         {
             FiducialId = id,
             Id = id.ToString(CultureInfo.InvariantCulture),
-            X = xmm.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
-            Y = ymm.ToString("+0.0000;-0.0000", CultureInfo.InvariantCulture),
+            X = Format.Signed(xmm, "0.0000"),
+            Y = Format.Signed(ymm, "0.0000"),
             Direction = showWhere ? FiducialHelper.Describe(xmm, ymm) : "",
             PixelI = mark is null ? "—" : mark.I.ToString("0.0", CultureInfo.InvariantCulture),
             PixelJ = mark is null ? "—" : mark.J.ToString("0.0", CultureInfo.InvariantCulture),
@@ -531,7 +501,7 @@ public partial class MainWindow
         }
 
         if (image.Interior is { IsValid: true } io)
-            lines.Add($"✓ δ = {io.PixelSizeMm:0.000000} mm/px，x0 = {io.X0:+0.0000;-0.0000} mm");
+            lines.Add($"✓ δ = {io.PixelSizeMm:0.000000} mm/px，x0 = {Format.Signed(io.X0, "0.0000")} mm");
         else
             allOk = false;
 

@@ -66,14 +66,59 @@
             <Setter Property="ColumnHeaderStyle" Value="{StaticResource MeasureHeaderStyle}"/>
             <Setter Property="CellStyle" Value="{StaticResource MeasureCellStyle}"/>
         </Style>
+
+        <!-- ===== 结果残差页的两张表 =====
+
+             与点表共用一副皮，只多两样本事：
+             ① 行可按数据染成警示色（残差偏大的那行），所以单元格不能自己钉死前景色，
+                否则行上的颜色传不下来；
+             ② 残差表的列由代码按模块生成（内定向列框标、后方交会列控制点、相对定向列同名点）。 -->
+        <Style x:Key="ResultCellStyle" TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ResultRowStyle" TargetType="DataGridRow">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Warn}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource ErrBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ResultGridStyle" TargetType="DataGrid"
+               BasedOn="{StaticResource MeasureGridStyle}">
+            <Setter Property="CellStyle" Value="{StaticResource ResultCellStyle}"/>
+            <Setter Property="RowStyle" Value="{StaticResource ResultRowStyle}"/>
+        </Style>
     </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="46"/>
             <RowDefinition Height="42"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="198"/>
+            <RowDefinition Height="*" MinHeight="240"/>
+            <!-- 分隔条自己占一行：结果表动辄十几行，198 px 只够看个零头，得能往上拖 -->
+            <RowDefinition Height="5"/>
+            <RowDefinition x:Name="BottomPanelRow" Height="198" MinHeight="120"/>
             <RowDefinition Height="26"/>
         </Grid.RowDefinitions>
 
@@ -394,14 +439,6 @@
                                                         Style="{StaticResource ToolBtn}"
                                                         HorizontalAlignment="Stretch" Margin="3,0,0,0"/>
                                             </UniformGrid>
-                                            <Border Background="{StaticResource PanelBrush}"
-                                                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                                    CornerRadius="5" Padding="8" Margin="0,6,0,0">
-                                                <TextBlock x:Name="FiducialResultText" Text="尚未解算"
-                                                           FontSize="11" FontFamily="Consolas"
-                                                           Foreground="{StaticResource DimBrush}"
-                                                           TextWrapping="Wrap"/>
-                                            </Border>
                                         </StackPanel>
                                     </StackPanel>
 
@@ -439,14 +476,6 @@
                                         <Button Content="解算后方交会" Click="SolveResection_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
-                                        <Border Background="{StaticResource PanelBrush}"
-                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
-                                            <TextBlock x:Name="ResectionResultText" Text="尚未解算"
-                                                       FontSize="11" FontFamily="Consolas"
-                                                       Foreground="{StaticResource DimBrush}"
-                                                       TextWrapping="Wrap"/>
-                                        </Border>
                                         <Button Content="清空本影像刺点" Click="ClearGcpPoints_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
@@ -472,15 +501,6 @@
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
 
-                                        <Border Background="{StaticResource PanelBrush}"
-                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
-                                            <TextBlock x:Name="IntersectionResultText" Text="尚未解算"
-                                                       FontSize="11" FontFamily="Consolas"
-                                                       Foreground="{StaticResource DimBrush}"
-                                                       TextWrapping="Wrap"/>
-                                        </Border>
-
                                         <Button Content="清空配对" Click="ClearIntersectionPair_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
@@ -505,15 +525,6 @@
                                                 Click="SolveRelative_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
-
-                                        <Border Background="{StaticResource PanelBrush}"
-                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
-                                            <TextBlock x:Name="RelativeResultText" Text="尚未解算"
-                                                       FontSize="11" FontFamily="Consolas"
-                                                       Foreground="{StaticResource DimBrush}"
-                                                       TextWrapping="Wrap"/>
-                                        </Border>
 
                                         <Button Content="清空本像对的同名点" Click="ClearRelativeTies_Click"
                                                 Style="{StaticResource ToolBtn}"
@@ -557,7 +568,14 @@
         </Grid>
 
         <!-- ============ 底部面板 ============ -->
-        <Border Grid.Row="3" Background="{StaticResource PanelBrush}"
+        <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"
+                      ResizeDirection="Rows" Background="{StaticResource Panel3Brush}"
+                      BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,1"
+                      Cursor="SizeNS" DragCompleted="BottomSplitter_DragCompleted"
+                      ToolTip="拖动可调整底部面板高度"/>
+
+        <Border Grid.Row="4" Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
             <DockPanel>
                 <Border DockPanel.Dock="Top" Height="34"
@@ -672,13 +690,63 @@
                                    FontSize="12" Foreground="{StaticResource MutBrush}" Margin="0,2"
                                    TextWrapping="Wrap"/>
                     </StackPanel>
-                    <ScrollViewer x:Name="ResPanel" Visibility="Collapsed"
-                                  VerticalScrollBarVisibility="Auto">
-                        <TextBlock x:Name="ResPanelText"
-                                   FontSize="11.5" FontFamily="Consolas"
-                                   Foreground="{StaticResource MutBrush}"
-                                   Text="结果残差 · 尚未解算"/>
-                    </ScrollViewer>
+                    <!-- 结果残差：左元素表、右残差表。所有模块共用这一页，列随模块变 -->
+                    <Grid x:Name="ResPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="False">
+                            <TextBlock x:Name="ResTitleText" DockPanel.Dock="Left"
+                                       FontSize="11.5" VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutBrush}"
+                                       Text="结果残差 · 尚未解算"/>
+                            <TextBlock x:Name="ResSummaryText" DockPanel.Dock="Right"
+                                       FontSize="11" VerticalAlignment="Center"
+                                       Foreground="{StaticResource DimBrush}"/>
+                        </DockPanel>
+
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="470" MinWidth="240"/>
+                                <ColumnDefinition Width="5"/>
+                                <ColumnDefinition Width="*" MinWidth="240"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 元素表：解出来的是什么 -->
+                            <DataGrid x:Name="ResultGrid" Grid.Column="0"
+                                      Style="{StaticResource ResultGridStyle}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="项目" Width="108" Binding="{Binding Name}"/>
+                                    <DataGridTextColumn Header="符号" Width="58" Binding="{Binding Symbol}"/>
+                                    <DataGridTextColumn Header="数值" Width="96" Binding="{Binding Value}"/>
+                                    <DataGridTextColumn Header="单位" Width="46" Binding="{Binding Unit}"/>
+                                    <DataGridTextColumn Header="说明" Width="*" MinWidth="80" Binding="{Binding Note}"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <GridSplitter x:Name="ResColumnSplitter" Grid.Column="1" Width="5"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"
+                                          ResizeDirection="Columns" Background="Transparent"
+                                          Cursor="SizeWE"/>
+
+                            <!-- 残差表：每个点差多少。列在代码里按模块生成 -->
+                            <DataGrid x:Name="ResidualGrid" Grid.Column="2"
+                                      Style="{StaticResource ResultGridStyle}"/>
+                        </Grid>
+
+                        <TextBlock x:Name="ResNoteText" Grid.Row="2" FontSize="10.5"
+                                   Foreground="{StaticResource DimBrush}" TextWrapping="Wrap"
+                                   Margin="0,6,0,0" Visibility="Collapsed"/>
+
+                        <TextBlock x:Name="ResEmptyText" Grid.Row="1" Panel.ZIndex="2"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontSize="11.5" Foreground="{StaticResource DimBrush}"
+                                   Text="尚未解算"/>
+                    </Grid>
                     <TextBlock x:Name="LogPanel" Visibility="Collapsed"
                                FontSize="12" FontFamily="Consolas" Foreground="{StaticResource DimBrush}"
                                Text="14:02:11  [OK]  打开工程 教学实验_01.pht"/>
@@ -687,7 +755,7 @@
         </Border>
 
         <!-- ============ 状态栏 ============ -->
-        <Border Grid.Row="4" Background="{StaticResource Panel3Brush}"
+        <Border Grid.Row="5" Background="{StaticResource Panel3Brush}"
                 BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
             <DockPanel LastChildFill="False" Margin="12,0">
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
