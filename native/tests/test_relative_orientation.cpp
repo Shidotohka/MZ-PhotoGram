@@ -658,6 +658,92 @@ void test_degenerate()
     }
 }
 
+// ---------------------------------------------------------------- 7 粗差
+
+// 9 个点上插一个大粗差：门槛必须靠得住。
+//
+// 这一段就是当初漏掉的那种错：门槛取 3σ0 时，一个 Δ 的粗差把 σ0 抬到 Δ/√(n-5)，
+// n = 9 时门槛 ≈ 1.5Δ，于是它永远剔不掉自己，而程序照样报「0 个粗差」。改成稳健
+// 中误差之后才真的剔得掉——门槛与被测的那个点不共享同一份残差平方和。
+void test_gross_error()
+{
+    std::printf("\n== 7 粗差 ==\n");
+
+    const double b_true[3] = { 0.05, 1.0, 0.002 };     // 旁向像对，最容易被粗差带歪
+    const double phi = 0.002, omega = -0.003, kappa = 0.0015;
+    const M3 r_doc = transpose(rot_from_angles(phi, omega, kappa));
+
+    std::vector<double> xyz;
+    make_scene(9, 31415926ULL, &xyz);
+    Pair clean;
+    project_pair(xyz, b_true, r_doc, &clean);
+
+    char d[192];
+
+    // 7.1 干净数据一个也不许剔：门槛的下限由先验中误差定，q 在浮点噪声里
+    {
+        const Result r = solve(clean, 0.02);
+        std::snprintf(d, sizeof(d), "剔除 %d，参与 %d，q_rms %.2e mm",
+                      r.out.rejected_count, r.out.used_count, r.out.q_rms_mm);
+        say(r.code == PGM_OK && r.out.rejected_count == 0 && r.out.used_count == 9,
+            "干净数据不剔点", d);
+    }
+
+    // 7.2 右片第 5 个点的 x 偏 1 mm（约 22 个像元）
+    //
+    // 偏 x 而不是 y，这一步踩过一次：旁向像对（基线在 v 方向）的核面法向 ≈ (f, 0, x)，
+    // 共面条件量的是右片点在 u-w 面里的偏差，y 方向的误差几乎不进 q——实测把 ry 推 1 mm，
+    // 残差只剩 0.014 mm，5 个元素把误差整个吸进去了，一个都不该剔，也确实剔不出来。
+    // 那不是判据的错，是那个方向本来就不敏感。
+    {
+        Pair bad = clean;
+        const int k = 4;
+        bad.rx[k] += 1.0;
+
+        const Result r = solve(bad, 0.02);
+        std::snprintf(d, sizeof(d), "返回码 %d，剔除 %d，参与 %d，q_rms %.2e mm",
+                      static_cast<int>(r.code), r.out.rejected_count, r.out.used_count,
+                      r.out.q_rms_mm);
+        say(r.code == PGM_OK, "带粗差仍然解得出", d);
+
+        std::snprintf(d, sizeof(d), "剔除 %d（应为 1）", r.out.rejected_count);
+        say(r.out.rejected_count == 1 && r.out.used_count == 8, "1 mm 粗差被剔掉", d);
+
+        // 剔掉之后剩下的 8 个点是精确的，解必须干净地回到真值
+        std::snprintf(d, sizeof(d), "%.2e / %.2e（判据 <1e-9）",
+                      max_baseline_error(r.out, b_true), max_angle_error(r.out, phi, omega, kappa));
+        say(max_baseline_error(r.out, b_true) < 1e-9 &&
+                max_angle_error(r.out, phi, omega, kappa) < 1e-9,
+            "剔完粗差后元素回到真值", d);
+
+        std::snprintf(d, sizeof(d), "q_rms %.2e mm（判据 <1e-9）", r.out.q_rms_mm);
+        say(r.out.q_rms_mm < 1e-9, "剔完粗差后视差归零", d);
+
+        if (r.used.size() == static_cast<size_t>(clean.n)) {
+            int flagged = 0;
+            for (int i = 0; i < clean.n; ++i) {
+                if (r.used[static_cast<size_t>(i)] == 0) ++flagged;
+            }
+            std::snprintf(d, sizeof(d), "flags 里 %d 个 0", flagged);
+            say(flagged == 1 && r.used[static_cast<size_t>(k)] == 0, "逐点标记对得上", d);
+        }
+    }
+
+    // 7.3 不给先验中误差：门槛落到 0.01 mm 的底，粗差照样剔得掉。
+    // 给 2 mm：n = 9 时 5 个元素能吸掉小粗差的一大半，0.5 mm 推下去只剩 0.1 mm，
+    // 落在稳健门槛附近，剔不剔都说得过去——这种边界不该拿来当判据。
+    {
+        Pair bad = clean;
+        bad.rx[6] -= 2.0;
+        const Result r = solve(bad, 0.0);
+        std::snprintf(d, sizeof(d), "返回码 %d，剔除 %d，参与 %d，q_rms %.2e mm，最大 |q| %.2e",
+                      static_cast<int>(r.code), r.out.rejected_count, r.out.used_count,
+                      r.out.q_rms_mm, r.out.q_max_abs_mm);
+        say(r.code == PGM_OK && r.out.rejected_count == 1 && r.out.used_count == 8,
+            "不给 σ 也能剔", d);
+    }
+}
+
 }  // namespace
 
 int main()
@@ -681,6 +767,7 @@ int main()
 
     test_noise();
     test_degenerate();
+    test_gross_error();
 
     std::printf("\n");
     if (g_failures == 0) {

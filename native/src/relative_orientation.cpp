@@ -51,7 +51,17 @@ constexpr int kUnknowns = 5;
 
 constexpr int kMinPairs = 5;
 constexpr int kMinPairsForReject = 7;   // 剔点后至少留 6 对，才有 1 个多余观测
-constexpr int kMaxRejectRounds = 2;
+
+// 一次只试一个点，最多四轮。每轮要解两次（试解 + 记下），四轮也就多算六次，对这种
+// 规模无所谓；写小一点反倒会让「3 个点配错」这种情况只剔掉两个。
+constexpr int kMaxRejectRounds = 4;
+
+// 「拿掉它之后单位权中误差至少缩小这么多倍」才算粗差。取 2.5：约 7σ 的错点能剔出来，
+// 而正常点位里最差的那个拿掉，σ0 只会动百分之几——两头都留了余量。
+constexpr double kRejectGain = 2.5;
+
+// 每轮试几个候选。分摊之后 |q| 最大的未必是错点，只试一个经常试错人。
+constexpr int kRejectCandidates = 3;
 
 constexpr int    kDefaultMaxIterations = 50;
 constexpr double kDefaultTolerance = 1e-10;
@@ -350,7 +360,15 @@ int32_t pgm_relative_orientation(const pgm_relative_orientation_input*  in,
         return PGM_ERR_NULL_ARGUMENT;
     }
 
+    // 两个缓冲区指针是调用方在进来之前填好的，memset 会把它们一起清掉——先捞出来。
+    // 少了这一步，逐点上下视差与剔除标记永远不会写出来，而 out 里的统计量照样正常，
+    // 于是「一个人都没剔」看起来像个正常结果。
+    double*  residual_q = out->residual_q_mm;
+    int32_t* used_flags = out->used_flags;
+
     std::memset(out, 0, sizeof(*out));
+    out->residual_q_mm = residual_q;
+    out->used_flags    = used_flags;
 
     if (!(in->focal_length_mm > 0.0) || !std::isfinite(in->focal_length_mm)) {
         pgm::set_error("主距必须为正的有限值");
@@ -441,40 +459,72 @@ int32_t pgm_relative_orientation(const pgm_relative_orientation_input*  in,
 
         int32_t status = solve_orientation(s, keep, free2, max_iterations, tolerance, &st, &q);
 
-        // ---- 粗差：|q| 超过 max(3σ0, 3σ_像点) 的当粗差剔掉重解，最多两轮。
-        // 一个也不许剁掉太多：每轮最多剔 n/5，且解算点数不少于 7（剔完还有 1 个多余观测）。
+        // ---- 粗差：一次剔一个，最多 kMaxRejectRounds 轮。
+        //
+        // 判据不能只看「|q| 超 3σ」——σ 是哪来的？
+        //   · 用 σ0：一个 Δ 的粗差把 σ0 抬到 Δ/√(n−5)，门槛 3σ0 也水涨船高，
+        //     n ≤ 14 时它永远剔不掉自己。
+        //   · 用中位数（MAD）：n 小的时候最小二乘会挪动 5 个元素把粗差分摊到所有点上，
+        //     实测 2 mm 的错点摊成每点 0.3 mm，中位数跟着一起涨，同样剔不掉。
+        // 所以判据做成「拿掉它再解一次」：真粗差一走，其余点会突然一致起来，单位权中误差
+        // 塌一个量级；好点里最差的那个拿掉，σ0 只会微微动一下。这个比较两头都躲得开。
+        //
+        // 还要试几个候选：最小二乘分摊之后，|q| 最大的未必就是错点（实测 12 个点里
+        // 2 mm 的错点排第二）。只试最大的那一个，经常正好试了个好点，于是「一个都不剔」。
         int rejected = 0;
         if (status == PGM_OK) {
             const double floor = (in->image_sigma_mm > 0.0) ? 3.0 * in->image_sigma_mm
                                                             : kRejectFloorMm;
             for (int round = 0; round < kMaxRejectRounds; ++round) {
-                if (st.n_used < kMinPairsForReject) break;
+                // 剔完还得留得住 1 个多余观测
+                if (st.n_used - 1 < kMinPairsForReject) break;
 
-                const double threshold = std::max(3.0 * st.sigma0, floor);
-
-                std::vector<int> suspects;
+                std::vector<int> cand;
+                cand.reserve(static_cast<size_t>(s.n));
                 for (int32_t i = 0; i < s.n; ++i) {
-                    if (keep[i] && std::fabs(q[i]) > threshold) suspects.push_back(i);
+                    if (keep[i]) cand.push_back(static_cast<int>(i));
                 }
-                if (suspects.empty()) break;
+                std::sort(cand.begin(), cand.end(),
+                          [&q](int a, int b) { return std::fabs(q[a]) > std::fabs(q[b]); });
+                if (cand.size() > static_cast<size_t>(kRejectCandidates)) {
+                    cand.resize(static_cast<size_t>(kRejectCandidates));
+                }
+                // 连门槛都够不着的，一个都不必试
+                if (cand.empty() || std::fabs(q[cand[0]]) <= floor) break;
 
-                const int budget = std::max(1, st.n_used / 5);
-                if (static_cast<int>(suspects.size()) > budget) {
-                    std::sort(suspects.begin(), suspects.end(),
-                              [&q](int a, int b) { return std::fabs(q[a]) > std::fabs(q[b]); });
-                    suspects.resize(static_cast<size_t>(budget));
-                }
-                for (size_t k = 0; k < suspects.size(); ++k) {
-                    keep[static_cast<size_t>(suspects[k])] = 0;
-                    ++rejected;
+                const double before = st.sigma0;
+
+                int                 best = -1;
+                double              best_after = before;
+                SolveState          best_state = st;
+                std::vector<double> best_q = q;
+
+                for (size_t ci = 0; ci < cand.size(); ++ci) {
+                    const int idx = cand[ci];
+
+                    std::vector<char>   trial_keep = keep;
+                    trial_keep[static_cast<size_t>(idx)] = 0;
+                    SolveState          trial_state = st;
+                    std::vector<double> trial_q(static_cast<size_t>(s.n), 0.0);
+
+                    const int32_t rc = solve_orientation(s, trial_keep, free2, max_iterations,
+                                                         tolerance, &trial_state, &trial_q);
+                    if (rc != PGM_OK) continue;
+
+                    if (trial_state.sigma0 < best_after) {
+                        best_after = trial_state.sigma0;
+                        best = idx;
+                        best_state = trial_state;
+                        best_q = trial_q;
+                    }
                 }
 
-                const int32_t again =
-                    solve_orientation(s, keep, free2, max_iterations, tolerance, &st, &q);
-                if (again != PGM_OK) {
-                    status = again;
-                    break;
-                }
+                if (best < 0 || !(best_after * kRejectGain < before)) break;
+
+                keep[static_cast<size_t>(best)] = 0;
+                st = best_state;
+                q = best_q;
+                ++rejected;
             }
         }
 
