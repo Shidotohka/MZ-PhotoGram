@@ -103,10 +103,12 @@ public partial class MainWindow
         var isInterior = name == "内定向";
         var isResection = name == "后方交会";
         var isIntersection = name == "前方交会";
+        var isRelative = name == "相对定向";
         InteriorPanel.Visibility = isInterior ? Visibility.Visible : Visibility.Collapsed;
         ResectionPanel.Visibility = isResection ? Visibility.Visible : Visibility.Collapsed;
         IntersectionPanel.Visibility = isIntersection ? Visibility.Visible : Visibility.Collapsed;
-        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection
+        RelativePanel.Visibility = isRelative ? Visibility.Visible : Visibility.Collapsed;
+        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection || isRelative
             ? Visibility.Collapsed
             : Visibility.Visible;
 
@@ -122,9 +124,11 @@ public partial class MainWindow
             CancelFiducialPicking();
         }
 
-        // 每个流程只显示自己那层的点：内定向看不到刺点，后方交会看不到框标
+        // 每个流程只显示自己那层的点：内定向看不到刺点，后方交会看不到框标，
+        // 相对定向只看同名点（控制点刺点混进来会让人分不清在配什么）
         Workspace.SetLayer(isInterior ? ImageLayer.Fiducials
             : isResection ? ImageLayer.ControlPoints
+            : isRelative ? ImageLayer.TiePoints
             : ImageLayer.All);
 
         // 刺点只在后方交会里生效；离开这个模块就退出刺点模式，免得在内定向里误点
@@ -132,10 +136,14 @@ public partial class MainWindow
 
         RefreshPointTable();
         if (isResection) UpdateResectionPanel();
+        if (isRelative) UpdateRelativePanel();
 
         // 离开前方交会就把配对清掉：留着两个临时像点却不在这个模块，谁也说不清它们是什么
         if (isIntersection) UpdateIntersectionPanel();
         else ClearIntersectionPair();
+
+        // 相对定向一样：没落成一整对的那半个点，离开模块就收走
+        if (!isRelative) CancelRelativePair();
     }
 
 }

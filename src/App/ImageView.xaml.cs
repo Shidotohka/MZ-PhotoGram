@@ -46,6 +46,8 @@ public enum ImageLayer
     Fiducials,
     /// <summary>只画已绑定到控制点的像点。</summary>
     ControlPoints,
+    /// <summary>只画同名点与未绑定的临时点，不画控制点刺点。相对定向用这个。</summary>
+    TiePoints,
     /// <summary>什么都不画（等宽对照窗之类）。</summary>
     None
 }
@@ -119,6 +121,8 @@ public partial class ImageView : UserControl
     private bool ShowsPoint(ImagePoint point) => _layer switch
     {
         ImageLayer.ControlPoints => point.BoundGcpId is not null,
+        // 相对定向：同名点与临时点都画，控制点刺点不画——那不是这一步的东西
+        ImageLayer.TiePoints => point.BoundGcpId is null,
         ImageLayer.Fiducials or ImageLayer.None => false,
         _ => true,
     };
@@ -329,10 +333,11 @@ public partial class ImageView : UserControl
 
         if (_selected is not null && !_markers.ContainsKey(_selected)) _selected = null;
 
-        // 绑定关系可能在外部改过，标签跟着变
+        // 绑定关系可能在外部改过，标签跟着变。控制点点号优先，其次同名点号，
+        // 都没有才显示这个像点自己的编号
         foreach (var (point, visual) in _markers)
         {
-            var label = point.BoundGcpId ?? point.Id;
+            var label = PointLabel(point);
             if (visual.Label.Text != label) visual.Label.Text = label;
         }
 
@@ -340,6 +345,10 @@ public partial class ImageView : UserControl
         PositionMarkers();
         SyncFiducialVisuals();
     }
+
+    /// <summary>标记上写字用哪个号：控制点点号 &gt; 同名点号 &gt; 像点自身编号。</summary>
+    private static string PointLabel(ImagePoint point) =>
+        point.BoundGcpId ?? point.BoundTiePointId ?? point.Id;
 
     private MarkerVisual CreateMarker(ImagePoint point)
     {
@@ -359,8 +368,8 @@ public partial class ImageView : UserControl
 
         var label = new TextBlock
         {
-            // 已绑定的点显示控制点点号，比内部观测号有用得多
-            Text = point.BoundGcpId ?? point.Id,
+            // 已绑定的点显示点号，比内部观测号有用得多
+            Text = PointLabel(point),
             FontSize = 10,
             FontFamily = new FontFamily("Consolas"),
             Foreground = UnboundBrush
@@ -413,8 +422,8 @@ public partial class ImageView : UserControl
         foreach (var (visual, _) in _fiducialVisuals.Values) Overlay.Children.Remove(visual);
         _fiducialVisuals.Clear();
 
-        // 框标只属于内定向那一层
-        if (_item is null || _layer is ImageLayer.ControlPoints or ImageLayer.None) return;
+        // 框标只属于「全部」与「框标」两层
+        if (_item is null || _layer is not (ImageLayer.All or ImageLayer.Fiducials)) return;
 
         foreach (var mark in _item.FiducialMarks)
         {

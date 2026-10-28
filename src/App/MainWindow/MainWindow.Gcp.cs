@@ -169,16 +169,20 @@ public partial class MainWindow
         return true;
     }
 
-    /// <summary>点表按当前模块分发：内定向列框标，后方交会列控制点。</summary>
+    /// <summary>点表按当前模块分发：内定向列框标，后方交会列控制点，相对定向列同名点。</summary>
     private void RefreshPointTable()
     {
-        if (FiducialGrid is null) return;
+        if (FiducialGrid is null || TieGrid is null) return;
 
         var isFiducial = _moduleName == "内定向";
+        var isRelative = _moduleName == "相对定向";
+
         FiducialGrid.Visibility = isFiducial ? Visibility.Visible : Visibility.Collapsed;
-        GcpGrid.Visibility = isFiducial ? Visibility.Collapsed : Visibility.Visible;
+        GcpGrid.Visibility = isFiducial || isRelative ? Visibility.Collapsed : Visibility.Visible;
+        TieGrid.Visibility = isRelative ? Visibility.Visible : Visibility.Collapsed;
 
         if (isFiducial) RefreshFiducialTable();
+        else if (isRelative) RefreshTieTable();
         else RefreshGcpTable();
     }
 

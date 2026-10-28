@@ -486,6 +486,40 @@
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
                                     </StackPanel>
 
+                                    <!-- 相对定向 -->
+                                    <StackPanel x:Name="RelativePanel" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock x:Name="RelativeHint" FontSize="11"
+                                                   Foreground="{StaticResource DimBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <Border Background="{StaticResource PanelBrush}"
+                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
+                                            <TextBlock x:Name="RelativePairText" Text="左片 —　右片 —"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       Foreground="{StaticResource DimBrush}"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <Button x:Name="RelativeSolveButton" Content="解算相对定向"
+                                                Click="SolveRelative_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+
+                                        <Border Background="{StaticResource PanelBrush}"
+                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
+                                            <TextBlock x:Name="RelativeResultText" Text="尚未解算"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       Foreground="{StaticResource DimBrush}"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <Button Content="清空本像对的同名点" Click="ClearRelativeTies_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+                                    </StackPanel>
+
                                     <!-- 其他模块的占位 -->
                                     <StackPanel x:Name="GenericTaskPanel" Margin="0,8,0,0">
                                         <Grid>
@@ -605,6 +639,28 @@
                                     <DataGridTextColumn Header="像平面 y (mm)" Width="118" Binding="{Binding Ymm}"/>
                                     <DataGridTextColumn Header="像素" Width="104" Binding="{Binding Pixel}"/>
                                     <DataGridTextColumn Header="残差 (mm)" Width="92" Binding="{Binding Residual}"/>
+                                    <DataGridTextColumn Header="说明" Width="*" Binding="{Binding Note}"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <!-- 相对定向：同名点。一个点号在左右两片各有一个观测 -->
+                            <DataGrid x:Name="TieGrid" Style="{StaticResource MeasureGridStyle}"
+                                      Visibility="Collapsed"
+                                      SelectionChanged="TieGrid_SelectionChanged">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu Style="{StaticResource MenuPopup}">
+                                        <MenuItem Header="在两张片上选中这对同名点" Click="TieLocate_Click"/>
+                                        <MenuItem Header="删掉这对同名点" Click="DeleteSelectedTie_Click"/>
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="点号" Width="76" Binding="{Binding Id}"/>
+                                    <DataGridTextColumn Header="左 x (mm)" Width="112" Binding="{Binding LeftX}"/>
+                                    <DataGridTextColumn Header="左 y (mm)" Width="112" Binding="{Binding LeftY}"/>
+                                    <DataGridTextColumn Header="右 x (mm)" Width="112" Binding="{Binding RightX}"/>
+                                    <DataGridTextColumn Header="右 y (mm)" Width="112" Binding="{Binding RightY}"/>
+                                    <DataGridTextColumn Header="q (mm)" Width="100" Binding="{Binding Q}"/>
+                                    <DataGridTextColumn Header="状态" Width="76" Binding="{Binding State}"/>
                                     <DataGridTextColumn Header="说明" Width="*" Binding="{Binding Note}"/>
                                 </DataGrid.Columns>
                             </DataGrid>

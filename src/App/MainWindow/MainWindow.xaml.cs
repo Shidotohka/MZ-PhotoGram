@@ -306,8 +306,10 @@ public partial class MainWindow : Window
 
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
-        // 前方交会靠「选中了哪个窗的哪个点」来配对，所以每次选中变化都要过一遍
+        // 前方交会靠「选中了哪个窗的哪个点」来配对，相对定向靠它攒点对，
+        // 所以每次选中变化都要过一遍
         HandleIntersectionPick();
+        HandleRelativePick();
 
         var point = Workspace.SelectedPoint;
         UpdateStatusCounts();
@@ -370,6 +372,12 @@ public partial class MainWindow : Window
                     SetActiveGcp(null);
                     GcpGrid.SelectedItem = null;
                     DiagSummary.Text = "已停止刺点。在量测表里重新选一个控制点即可继续。";
+                    DiagSummary.Foreground = DimBadge;
+                }
+                else if (_relLeft is not null || _relRight is not null)
+                {
+                    CancelRelativePair();
+                    DiagSummary.Text = "已取消这一对同名点";
                     DiagSummary.Foreground = DimBadge;
                 }
                 else

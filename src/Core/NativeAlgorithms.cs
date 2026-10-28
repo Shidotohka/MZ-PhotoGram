@@ -225,6 +225,64 @@ public sealed class IntersectionResult
 /// 它只接受干净的右手系。判地面轴序、换轴、结果过闸门这些「要知道数据长什么样」的事在本类里做。
 /// </para>
 /// </summary>
+/// <summary>
+/// 相对定向的输出。角度同时给度与弧度：界面用度，继续算（模型交会）用弧度。
+///
+/// <para><see cref="Success"/> 为 false 时，除 <see cref="ErrorCode"/> 与 <see cref="Message"/>
+/// 外都不保证有意义——尤其返回「未收敛」时数值是最后一次迭代值，不是解。</para>
+/// </summary>
+public sealed class RelativeOrientationResult
+{
+    public bool Success { get; init; }
+
+    /// <summary>原生返回码。0 = 成功，2 = 点太少，3 = 几何退化，7 = 未收敛。</summary>
+    public int ErrorCode { get; init; }
+
+    /// <summary>失败说明。成功时为空串。</summary>
+    public string Message { get; init; } = string.Empty;
+
+    /// <summary>单位基线方向（|b| = 1）。</summary>
+    public double Bx { get; init; }
+    public double By { get; init; }
+    public double Bz { get; init; }
+
+    public double PhiRad { get; init; }
+    public double OmegaRad { get; init; }
+    public double KappaRad { get; init; }
+
+    public double PhiDeg { get; init; }
+    public double OmegaDeg { get; init; }
+    public double KappaDeg { get; init; }
+
+    /// <summary>实际冻结的基线分量：0 = b_x、1 = b_y、2 = b_z。</summary>
+    public int Gauge { get; init; }
+
+    public int Iterations { get; init; }
+    public int UsedCount { get; init; }
+    public int RejectedCount { get; init; }
+
+    /// <summary>多余观测数 = 参与解算的点对数 - 5。</summary>
+    public int Redundancy { get; init; }
+
+    /// <summary>单位权中误差，mm。<b>只按参与解算的点</b>统计，所以被剔除的点不影响它。</summary>
+    public double Sigma0Mm { get; init; }
+
+    /// <summary>上下视差中误差，mm。</summary>
+    public double QRmsMm { get; init; }
+
+    /// <summary>最大 |q|，mm。</summary>
+    public double QMaxAbsMm { get; init; }
+
+    /// <summary>法方程条件数 λmax/λmin。</summary>
+    public double Condition { get; init; }
+
+    /// <summary>逐点上下视差，mm，顺序与输入的点对一致。未收敛以外的失败时为空。</summary>
+    public IReadOnlyList<double> ResidualQ { get; init; } = Array.Empty<double>();
+
+    /// <summary>逐点是否参与了解算（不是粗差）。顺序与输入的点对一致。</summary>
+    public IReadOnlyList<bool> Used { get; init; } = Array.Empty<bool>();
+}
+
 public static class NativeAlgorithms
 {
     /// <summary>4 个框标以下不允许解算：3 个时多余观测为 0，残差恒为 0。</summary>
@@ -852,9 +910,176 @@ public static class NativeAlgorithms
         };
     }
 
-    /// <summary>外方位元素（角度为度）→ 原生侧的姿态（角度为弧度）。</summary>
-    private static NativeAbi.CameraPose ToPose(ExteriorOrientation eo) => new()
+    // ---------------------------------------------------------------- 相对定向封装
+
+    /// <summary>
+    /// 相对定向至少要 6 对同名点：5 个未知数，6 对才有 1 个多余观测、才谈得上 σ₀。
+    /// 原生侧允许 5 对（凑满方程数），但那时残差恒为 0，解出来的东西没法判断好坏。
+    /// </summary>
+    public const int MinRelativePairs = 6;
+
+    /// <summary>原生返回码：同名点对少于 5 对。</summary>
+    public const int RelativeErrorTooFewPoints = 2;
+
+    /// <summary>原生返回码：几何退化（平均视差为零、法方程秩亏、迭代发散）。</summary>
+    public const int RelativeErrorDegenerate = 3;
+
+    /// <summary>
+    /// 相对定向：由两片上的同名像点求<b>相对方位元素</b>，不需要任何地面坐标。
+    ///
+    /// <para>输出都在像空间辅助系里，原点在左片摄影中心、三轴平行于左片像空间系。
+    /// 基线是单位方向（|b| = 1），模型比例尺自由——这不是缺陷，是相对定向的规准：
+    /// 绝对定向的 λ 再把它拉回米制。</para>
+    ///
+    /// <para>一次只解一个像对。挑点、闸门、把结果写回工程由 <c>RelativeOrientationTask</c> 负责，
+    /// 这一层不判断「该不该解」，只把数算出来。</para>
+    /// </summary>
+    /// <param name="left">左片同名像点，像平面 mm，按点对顺序排列。</param>
+    /// <param name="right">右片同名像点，与 <paramref name="left"/> 一一对应。</param>
+    /// <param name="focalLengthMm">焦距 mm。两张片共用同一个相机。</param>
+    /// <param name="imageSigmaMm">像点先验中误差 mm，只用于粗差门槛；0 表示不知道。</param>
+    /// <param name="maxIterations">&lt;= 0 取原生默认。</param>
+    /// <param name="tolerance">&lt;= 0 取原生默认（对归一化改正数）。</param>
+    public static RelativeOrientationResult SolveRelativeOrientation(
+        IReadOnlyList<ImagePointMm> left,
+        IReadOnlyList<ImagePointMm> right,
+        double focalLengthMm,
+        double imageSigmaMm = 0.0,
+        int maxIterations = 0,
+        double tolerance = 0.0)
     {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        if (left.Count != right.Count)
+        {
+            return new RelativeOrientationResult
+            {
+                ErrorCode = -1,
+                Message = $"左右两片的点数不一致（{left.Count} / {right.Count}）。",
+            };
+        }
+
+        var n = left.Count;
+        if (n == 0)
+        {
+            return new RelativeOrientationResult
+            {
+                ErrorCode = -1,
+                Message = "没有同名点对。",
+            };
+        }
+
+        var lx = new double[n];
+        var ly = new double[n];
+        var rx = new double[n];
+        var ry = new double[n];
+        for (var k = 0; k < n; k++)
+        {
+            lx[k] = left[k].X;
+            ly[k] = left[k].Y;
+            rx[k] = right[k].X;
+            ry[k] = right[k].Y;
+        }
+
+        IntPtr plx = IntPtr.Zero, ply = IntPtr.Zero, prx = IntPtr.Zero, pry = IntPtr.Zero;
+        IntPtr pq = IntPtr.Zero, pused = IntPtr.Zero;
+        try
+        {
+            plx = Alloc(lx);
+            ply = Alloc(ly);
+            prx = Alloc(rx);
+            pry = Alloc(ry);
+            pq = Marshal.AllocHGlobal(n * sizeof(double));
+            pused = Marshal.AllocHGlobal(n * sizeof(int));
+
+            var input = new NativeAbi.RelativeInput
+            {
+                Count = n,
+                LeftX = plx,
+                LeftY = ply,
+                RightX = prx,
+                RightY = pry,
+                FocalLengthMm = focalLengthMm,
+                ImageSigmaMm = imageSigmaMm,
+                MaxIterations = maxIterations,
+                Tolerance = tolerance,
+            };
+            var output = new NativeAbi.RelativeOutput { ResidualQ = pq, UsedFlags = pused };
+
+            int rc;
+            try
+            {
+                rc = NativeAbi.pgm_relative_orientation(ref input, ref output);
+            }
+            catch (DllNotFoundException)
+            {
+                return new RelativeOrientationResult
+                {
+                    ErrorCode = -1,
+                    Message = "找不到 photogrammetry.dll。先运行 " +
+                              "cmake --build native/build --config Release 再重新构建托管项目。",
+                };
+            }
+            catch (BadImageFormatException)
+            {
+                return new RelativeOrientationResult
+                {
+                    ErrorCode = -1,
+                    Message = "photogrammetry.dll 位数不匹配。托管进程是 x64，DLL 也必须是 x64。",
+                };
+            }
+
+            // 只有 PGM_OK 与「未收敛」两种返回码会写满 out（后者是最后一次迭代值）。
+            // 其余返回码下缓冲区内容未定义，读出来只会是垃圾，宁可不给。
+            var filled = rc == 0 || rc == ErrorNotConverged;
+
+            var q = new double[n];
+            var used = new bool[n];
+            if (filled)
+            {
+                Marshal.Copy(pq, q, 0, n);
+                var flags = new int[n];
+                Marshal.Copy(pused, flags, 0, n);
+                for (var k = 0; k < n; k++) used[k] = flags[k] != 0;
+            }
+
+            return new RelativeOrientationResult
+            {
+                Success = rc == 0,
+                ErrorCode = rc,
+                Message = rc == 0 ? string.Empty : LastError,
+                Bx = output.Bx,
+                By = output.By,
+                Bz = output.Bz,
+                PhiRad = output.PhiRad,
+                OmegaRad = output.OmegaRad,
+                KappaRad = output.KappaRad,
+                PhiDeg = output.PhiDeg,
+                OmegaDeg = output.OmegaDeg,
+                KappaDeg = output.KappaDeg,
+                Gauge = output.Gauge,
+                Iterations = output.Iterations,
+                UsedCount = output.UsedCount,
+                RejectedCount = output.RejectedCount,
+                Redundancy = output.Redundancy,
+                Sigma0Mm = output.Sigma0Mm,
+                QRmsMm = output.QRmsMm,
+                QMaxAbsMm = output.QMaxAbsMm,
+                Condition = output.Condition,
+                ResidualQ = q,
+                Used = used,
+            };
+        }
+        finally
+        {
+            foreach (var p in new[] { plx, ply, prx, pry, pq, pused })
+                if (p != IntPtr.Zero) Marshal.FreeHGlobal(p);
+        }
+    }
+
+    /// <summary>外方位元素（角度为度）→ 原生侧的姿态（角度为弧度）。</summary>
+    private static NativeAbi.CameraPose ToPose(ExteriorOrientation eo) => new()    {
         Xs = eo.Xs,
         Ys = eo.Ys,
         Zs = eo.Zs,

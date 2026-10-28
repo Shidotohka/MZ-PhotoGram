@@ -158,4 +158,71 @@ internal static class NativeAbi
     internal static extern int pgm_forward_intersection(
         ref IntersectionInput input, ref IntersectionOutput output);
 
+    // ---------------------------------------------------------------- 相对定向
+
+    /// <summary>
+    /// 相对定向的输入，对应 <c>pgm_relative_orientation_input</c>。
+    /// 四个数组必须一样长（同一批同名点对），长度给在 <c>Count</c> 里。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct RelativeInput
+    {
+        public int Count;
+        public IntPtr LeftX;
+        public IntPtr LeftY;
+        public IntPtr RightX;
+        public IntPtr RightY;
+        public double FocalLengthMm;
+
+        /// <summary>像点坐标先验中误差 mm。0 表示不知道，粗差门槛取 3σ₀ 与 0.01 mm 的大者。</summary>
+        public double ImageSigmaMm;
+
+        /// <summary>&lt;= 0 取原生默认（50）。</summary>
+        public int MaxIterations;
+
+        /// <summary>&lt;= 0 取原生默认（1e-10，对归一化改正数）。</summary>
+        public double Tolerance;
+    }
+
+    /// <summary>
+    /// 相对定向的输出，对应 <c>pgm_relative_orientation_output</c>。
+    /// 两个指针指向调用方预分配的 <c>Count</c> 个元素，不需要时给 <see cref="IntPtr.Zero"/>。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct RelativeOutput
+    {
+        /// <summary>单位基线方向，|b| = 1。</summary>
+        public double Bx, By, Bz;
+
+        public double PhiRad, OmegaRad, KappaRad;
+        public double PhiDeg, OmegaDeg, KappaDeg;
+
+        /// <summary>辅助系方向 → 像空间 的 3×3，行主序。与后方交会的 Rotation 同一约定。</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 9)]
+        public double[] Rotation;
+
+        /// <summary>实际冻结的基线分量：0 = b_x、1 = b_y、2 = b_z。</summary>
+        public int Gauge;
+
+        public int Iterations;
+        public int UsedCount;
+        public int RejectedCount;
+        public int Redundancy;
+
+        public double Sigma0Mm;
+        public double QRmsMm;
+        public double QMaxAbsMm;
+        public double Condition;
+
+        /// <summary>逐点上下视差 mm。</summary>
+        public IntPtr ResidualQ;
+
+        /// <summary>逐点 1 = 参与解算、0 = 被当粗差剔除。</summary>
+        public IntPtr UsedFlags;
+    }
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int pgm_relative_orientation(
+        ref RelativeInput input, ref RelativeOutput output);
+
 }

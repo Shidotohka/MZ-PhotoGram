@@ -46,6 +46,12 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => string.Equals(a, "--relative", StringComparison.OrdinalIgnoreCase)))
+        {
+            RelativeCheck();
+            return;
+        }
+
         if (args.Any(a => string.Equals(a, "--abi", StringComparison.OrdinalIgnoreCase)))
         {
             AbiCheck();
@@ -225,6 +231,13 @@ internal static class Program
         if (args.Any(a => string.Equals(a, "--intersect-demo", StringComparison.OrdinalIgnoreCase)))
         {
             RunIntersectDemo(win);
+            Pump(win);
+        }
+
+        // 相对定向的界面端到端：两张片各点 12 个同名点 → 点对进点表 → 按解算 → 看面板
+        if (args.Any(a => string.Equals(a, "--relative-demo", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunRelativeDemo(win);
             Pump(win);
         }
 
@@ -994,8 +1007,160 @@ internal static class Program
             : $"[FAIL] 面板没有显示结果：[{shown}]");
     }
 
-    private static void RunM3(MainWindow win, ImageItem image, string gcpFile)
+    /// <summary>
+    /// 相对定向的界面端到端：两张片各点 12 个同名像点，看它们是否落成点表里的 12 对，
+    /// 再按「解算」按钮那条路径跑一次，最后看面板上有没有结果。
+    ///
+    /// <para>这里刻意走 <see cref="ImageView.AddPointAt"/>，和用户单击走同一条路径
+    /// （新建像点 → 选中 → SelectionChanged → 攒点对 → 落成同名点），
+    /// 不是另开一个「塞数据」的后门——那种测法只能证明数据结构和算法是对的，
+    /// 证明不了界面接得上。</para>
+    /// </summary>
+    private static void RunRelativeDemo(MainWindow win)
     {
+        Console.WriteLine("\n相对定向界面端到端─────────────────────────────────────");
+
+        var ws = FindChild<ImageWorkspace>(win);
+        var views = ws?.VisibleViews().Where(v => v.HasImage).ToList();
+        if (ws is null || views is null || views.Count != 2)
+        {
+            Console.WriteLine("[FAIL] 需要两张片：--image 左片 --loadsecond 右片");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        const double f = 152.72;
+        const double pixelMm = 0.04503;
+        const double h = 3000.0;
+        const double depth = 2200.0;
+
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
+        var items = views.Select(v => v.Image!).ToList();
+        for (var k = 0; k < 2; k++) items[k].Interior = io;
+
+        // 工作区里的影像未必在工程里（--image / --loadsecond 是临时塞进去的）。
+        // 同名点的成员是在工程里按影像找的，所以先把这两张登记进工程——
+        // 用户是从影像库拖进来的，本来就在工程里，这里只是补上工具跳过的这一步。
+        foreach (var item in items)
+        {
+            if (win.CurrentProject.Images.All(i => i.Id != item.Id)) win.CurrentProject.Images.Add(item);
+        }
+
+        Console.WriteLine($"  左 {items[0].Id} {items[0].Width}×{items[0].Height}　" +
+                          $"右 {items[1].Id} {items[1].Width}×{items[1].Height}");
+
+        // 布景按**影像自己的幅面**缩：这一对样片是缩略图（512 见方），
+        // 按 5616×3744 的航片尺寸摆点会整片落在框外
+        var halfY = items[0].Height / 2.0 * pixelMm / f * depth;
+        var halfX = items[0].Width / 2.0 * pixelMm / f * depth;
+        var baseM = 0.70 * 2.0 * halfY;
+
+        for (var k = 0; k < 2; k++)
+        {
+            items[k].Exterior = new ExteriorOrientation
+            {
+                Xs = 1000,
+                Ys = 2000 + k * baseM,
+                Zs = h,
+                Phi = k == 0 ? -0.5 : -0.45,
+                Omega = k == 0 ? 0.3 : 0.25,
+                Kappa = k == 0 ? 2.0 : 2.4,
+            };
+        }
+
+        var overlapLowY = 2000 + baseM - halfY;
+        var overlapHighY = 2000 + halfY;
+        var stepX = 0.55 * halfX / 1.5;
+
+        const int count = 12;
+        var added = 0;
+        for (var k = 0; k < count; k++)
+        {
+            var ix = k % 4;
+            var iy = k / 4;
+            var p = new GroundPointM(
+                1000.0 + (ix - 1.5) * stepX,
+                overlapLowY + (0.18 + 0.32 * iy) * (overlapHighY - overlapLowY),
+                h - depth + 0.05 * depth * Math.Sin(k * 1.7));
+
+            var pixels = new ImagePixel[2];
+            var ok = true;
+            for (var side = 0; side < 2; side++)
+            {
+                var mm = NativeAlgorithms.ProjectPoint(f, items[side].Exterior!, p);
+                if (mm is not { } m)
+                {
+                    ok = false;
+                    break;
+                }
+
+                var px = CoordinateConverter.ImagePlaneToPixel(m, io, items[side].Width, items[side].Height);
+                if (px.I < 0 || px.J < 0 || px.I >= items[side].Width || px.J >= items[side].Height)
+                {
+                    Console.WriteLine($"[FAIL] 第 {k + 1} 个点落在第 {side + 1} 张片框幅外：({px.I}, {px.J})");
+                    ok = false;
+                    break;
+                }
+
+                pixels[side] = px;
+            }
+
+            if (!ok)
+            {
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            // 左右两片各点一次。第一次只是选中，第二次落成一对同名点
+            views[0].AddPointAt(new Point(pixels[0].I, pixels[0].J));
+            views[1].AddPointAt(new Point(pixels[1].I, pixels[1].J));
+            added++;
+        }
+
+        Pump(win);
+        Console.WriteLine($"  两片各点了 {added} 次，左 ({items[0].Id}) 右 ({items[1].Id})");
+
+        var ties = win.CurrentProject.TiePoints.Count;
+        Console.WriteLine(ties == count
+            ? $"[PASS] 点表里攒出 {ties} 对同名点"
+            : $"[FAIL] 同名点 {ties} 对（应为 {count}）");
+        if (ties != count) Environment.ExitCode = 1;
+
+        var grid = win.FindName("TieGrid") as DataGrid;
+        var rows = (grid?.ItemsSource as System.Collections.ICollection)?.Count ?? -1;
+        Console.WriteLine(rows == count
+            ? $"[PASS] 点表显示了 {rows} 行"
+            : $"[FAIL] 点表显示 {rows} 行（应为 {count}）");
+        if (rows != count) Environment.ExitCode = 1;
+
+        var run = win.SolveRelativeNow();
+        if (!run.Success)
+        {
+            Console.WriteLine($"[FAIL] 相对定向没解出来：{run.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var r = run.Result!;
+        Console.WriteLine($"  {r.Iterations} 轮　基线 ({r.Bx:+0.000000;-0.000000}, {r.By:+0.000000;-0.000000}, " +
+                          $"{r.Bz:+0.000000;-0.000000})　φ {r.PhiDeg:+0.0000;-0.0000}°　" +
+                          $"q_rms {r.QRmsMm:0.0000} mm");
+        Console.WriteLine(r.QRmsMm < 0.03
+            ? "[PASS] 上下视差落在整像素量化能解释的量级"
+            : $"[FAIL] q_rms {r.QRmsMm:0.0000} mm 偏大");
+        if (r.QRmsMm >= 0.03) Environment.ExitCode = 1;
+
+        var panel = win.FindName("RelativeResultText") as TextBlock;
+        var shown = panel?.Text ?? "";
+        Console.WriteLine(shown.Contains("相对方位元素") && shown.Contains("基线 b")
+            ? "[PASS] 面板上显示了相对定向结果"
+            : $"[FAIL] 面板没有显示结果：[{shown}]");
+        if (!shown.Contains("相对方位元素")) Environment.ExitCode = 1;
+
+        Console.WriteLine($"[PASS] 结果写进了像对：{win.CurrentProject.Pairs.Count} 个像对");
+    }
+
+    private static void RunM3(MainWindow win, ImageItem image, string gcpFile)    {
         Console.WriteLine("\nM3 端到端───────────────────────────────────────────────");
 
         if (!win.LoadControlPointsFrom(Path.GetFullPath(gcpFile)))
@@ -1242,6 +1407,405 @@ internal static class Program
         var dy = a.Y - b.Y;
         var dz = a.Z - b.Z;
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // ---------------------------------------------------------------- 相对定向
+
+    /// <summary>
+    /// 相对定向的端到端自检：原生封装 → 流程层 → 工程持久化，一条链走两遍。
+    ///
+    /// <para>第一遍给<b>精确像点</b>（mm，不经像素量化），验的是算法与 ABI：解回来要落在
+    /// 合成时给的真值上，误差是浮点级的。第二遍把同一批点<b>量化成整数像素</b>再走流程层，
+    /// 验的是「点表 → 解算 → 写回工程 → 存盘 → 重开」这条路，误差落在半个像元该有的量级。</para>
+    /// </summary>
+    private static void RelativeCheck()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        Console.WriteLine("相对定向自检");
+        Console.WriteLine(new string('=', 78));
+
+        const double f = 152.72;
+        const double pixelMm = 0.04503;
+        const int width = 5616;
+        const int height = 3744;
+        const double h = 3000.0;
+
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
+
+        // 旁向像对：重叠 30% 在短边方向，所以基线是短边幅面的 70%。
+        // 幅面要按**模型点的深度**算，不是航高——点比基准面近，幅面会同比缩小。
+        const double depth = 2200.0;
+        var halfSwath = height / 2.0 * pixelMm / f * depth;
+        var baseM = 0.70 * 2.0 * halfSwath;
+
+        ExteriorOrientation Pose(double ys, double phi, double omega, double kappa) => new()
+        {
+            Xs = 1000, Ys = ys, Zs = h, Phi = phi, Omega = omega, Kappa = kappa
+        };
+
+        var leftEo = Pose(2000, -0.5, 0.3, 2.0);
+        var rightEo = Pose(2000 + baseM, -0.45, 0.25, 2.4);
+
+        // 真值：基线在辅助系里的方向 + 右片相对左片的旋转。
+        // 输出的 rotation 是「辅助系方向 → 右片像空间」，所以它等于 R_右 · R_左ᵀ，
+        // 不是反过来——写反了只会差一个转置，看起来仍然「像个旋转阵」。
+        var baselineGround = new[]
+        {
+            rightEo.Xs - leftEo.Xs, rightEo.Ys - leftEo.Ys, rightEo.Zs - leftEo.Zs
+        };
+        var rLeft = RotFromAngles(Rad(leftEo.Phi), Rad(leftEo.Omega), Rad(leftEo.Kappa));
+        var rRight = RotFromAngles(Rad(rightEo.Phi), Rad(rightEo.Omega), Rad(rightEo.Kappa));
+
+        var bTrue = MatVec(rLeft, baselineGround);
+        var bLength = Math.Sqrt(bTrue[0] * bTrue[0] + bTrue[1] * bTrue[1] + bTrue[2] * bTrue[2]);
+        for (var k = 0; k < 3; k++) bTrue[k] /= bLength;
+
+        var rTrue = MatMul(rRight, MatT(rLeft));
+
+        const int nPoints = 12;      // 4 列 × 3 行
+
+        var overlapLowY = rightEo.Ys - halfSwath;
+        var overlapHighY = leftEo.Ys + halfSwath;
+        var lmm = new List<ImagePointMm>();
+        var rmm = new List<ImagePointMm>();
+        var ground = new List<GroundPointM>();
+
+        // 12 个模型点，摆成 4×3 的格子而不是一条线。
+        // 沿一条斜线排的时候，5 个元素几乎都能被这一列点「解释」，条件数 5.8e5，
+        // 单个点的杠杆接近 0.94——2 mm 的粗差最后只留下 0.12 mm 的残差，谁也看不出来。
+        // 那不是判据不灵，是点位本身给不出约束。
+        for (var k = 0; k < nPoints; k++)
+        {
+            var ix = k % 4;
+            var iy = k / 4;
+            var x = 1000.0 + (ix - 1.5) * 800.0;
+            var y = overlapLowY + (0.18 + 0.32 * iy) * (overlapHighY - overlapLowY);
+            var z = h - depth + 120.0 * Math.Sin(k * 1.7);
+
+            var p = new GroundPointM(x, y, z);
+            var pl = NativeAlgorithms.ProjectPoint(f, leftEo, p);
+            var pr = NativeAlgorithms.ProjectPoint(f, rightEo, p);
+            if (pl is not { } a || pr is not { } b)
+            {
+                Console.WriteLine($"FAIL  第 {k + 1} 个模型点投影失败，后面全部跳过");
+                Console.WriteLine("\nSELFTEST FAIL");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            ground.Add(p);
+            lmm.Add(a);
+            rmm.Add(b);
+        }
+
+        var halfW = 0.5 * width * pixelMm;
+        var halfH = 0.5 * height * pixelMm;
+
+        // 出界要先说清是哪一个、差多少；否则只报一句 FAIL，看不出是布置错了还是算法错了
+        var outside = new List<string>();
+        for (var k = 0; k < lmm.Count; k++)
+        {
+            if (Math.Abs(lmm[k].X) >= halfW || Math.Abs(lmm[k].Y) >= halfH)
+                outside.Add($"左{k + 1}({lmm[k].X:0.0},{lmm[k].Y:0.0})");
+            if (Math.Abs(rmm[k].X) >= halfW || Math.Abs(rmm[k].Y) >= halfH)
+                outside.Add($"右{k + 1}({rmm[k].X:0.0},{rmm[k].Y:0.0})");
+        }
+
+        Check($"{nPoints} 个模型点都落在两片框幅内", outside.Count == 0,
+            outside.Count == 0
+                ? $"基线 {baseM:0} m　重叠带 Y ∈ [{overlapLowY:0}, {overlapHighY:0}]"
+                : $"{string.Join("、", outside)}　框幅 ±{halfW:0.0} × ±{halfH:0.0} mm");
+
+        // ---- 1 精确像点：验算法与 ABI
+        var exact = NativeAlgorithms.SolveRelativeOrientation(lmm, rmm, f, 0.02);
+
+        var bErr = Math.Max(Math.Abs(exact.Bx - bTrue[0]),
+            Math.Max(Math.Abs(exact.By - bTrue[1]), Math.Abs(exact.Bz - bTrue[2])));
+        Check("精确像点 → 基线方向回到真值", exact.Success && bErr < 1e-9,
+            $"b = ({exact.Bx:+0.0000000;-0.0000000}, {exact.By:+0.0000000;-0.0000000}, " +
+            $"{exact.Bz:+0.0000000;-0.0000000})　误差 {bErr:E2}");
+
+        var rSolved = RotFromAngles(exact.PhiRad, exact.OmegaRad, exact.KappaRad);
+        var rErr = MatMaxDiff(rSolved, rTrue);
+        Check("精确像点 → 三个角复原相对旋转", exact.Success && rErr < 1e-9,
+            $"最大元素差 {rErr:E2}");
+
+        Check("上下视差归零", exact.Success && exact.QRmsMm < 1e-9,
+            $"q_rms {exact.QRmsMm:E2} mm　σ₀ {exact.Sigma0Mm:E2} mm");
+        Check("迭代 2~10 轮", exact.Iterations is >= 2 and <= 10, $"{exact.Iterations} 轮");
+        Check($"{nPoints} 对点全部参与", exact.UsedCount == nPoints && exact.RejectedCount == 0,
+            $"参与 {exact.UsedCount}　剔除 {exact.RejectedCount}　余 {exact.Redundancy}");
+        Check("旁向像对冻结 b_y", exact.Gauge == 1, $"gauge = {exact.Gauge}");
+        Check("条件数合理", exact.Condition is > 0 and < 1e6, $"{exact.Condition:0.###E+0}");
+
+        // 模型交会：把相对定向结果当外方位喂给前方交会，模型点应当落在一条光线上
+        var model = NativeAlgorithms.IntersectRays(
+            new ExteriorOrientation(),
+            new ExteriorOrientation
+            {
+                Xs = exact.Bx, Ys = exact.By, Zs = exact.Bz,
+                Phi = exact.PhiDeg, Omega = exact.OmegaDeg, Kappa = exact.KappaDeg
+            },
+            lmm[0], rmm[0], f);
+        Check("结果可当外方位直接做模型交会", model.Success && model.MissDistance < 1e-6,
+            $"交会差 {model.MissDistance:E2}（模型单位）　比例系数 N 左 {model.NLeft:0.0000}");
+
+        // ---- 2 整数像素：验「点表 → 解算 → 写回工程」
+        var lpix = lmm.Select(p => CoordinateConverter.ImagePlaneToPixel(p, io, width, height)).ToArray();
+        var rpix = rmm.Select(p => CoordinateConverter.ImagePlaneToPixel(p, io, width, height)).ToArray();
+
+        Project MakeProject(int count, bool extraHalfPair = false)
+        {
+            var project = new Project { Name = "相对定向自检" };
+            var li = new ImageItem { Id = "IMG_L", Width = width, Height = height, Interior = io, Exterior = leftEo };
+            var ri = new ImageItem { Id = "IMG_R", Width = width, Height = height, Interior = io, Exterior = rightEo };
+            project.Images.Add(li);
+            project.Images.Add(ri);
+
+            for (var k = 0; k < count; k++)
+            {
+                var tieId = $"T{k + 1:00}";
+                project.TiePoints.Add(new TiePoint { Id = tieId });
+
+                li.Points.Add(new ImagePoint
+                {
+                    Id = $"P{k + 1:00}",
+                    ImageId = li.Id,
+                    PixelX = lpix[k].I,
+                    PixelY = lpix[k].J,
+                    BoundTiePointId = tieId,
+                    PositionMm = CoordinateConverter.PixelToImagePlane(lpix[k], io, width, height),
+                });
+                ri.Points.Add(new ImagePoint
+                {
+                    Id = $"P{k + 1:00}",
+                    ImageId = ri.Id,
+                    PixelX = rpix[k].I,
+                    PixelY = rpix[k].J,
+                    BoundTiePointId = tieId,
+                    PositionMm = CoordinateConverter.PixelToImagePlane(rpix[k], io, width, height),
+                });
+            }
+
+            if (extraHalfPair)
+            {
+                // 只点了左片的一个点：不该参与解算，但要被说出来
+                project.TiePoints.Add(new TiePoint { Id = "T99" });
+                li.Points.Add(new ImagePoint
+                {
+                    Id = "P99", ImageId = li.Id, PixelX = 2000, PixelY = 1500, BoundTiePointId = "T99"
+                });
+            }
+
+            return project;
+        }
+
+        var project1 = MakeProject(nPoints, extraHalfPair: true);
+        var run = RelativeOrientationTask.Run(project1, project1.Images[0], project1.Images[1]);
+
+        Check("流程层解算成功", run.Success, run.Success ? RelativeOrientationTask.Describe(run) : run.Message);
+        Check("半对的点被跳过且说清楚",
+            run.Skipped.Count == 1 && run.Skipped[0].Contains("T99") && run.Pairs.Count == nPoints,
+            run.Skipped.Count == 1 ? run.Skipped[0] : $"跳过 {run.Skipped.Count} 条");
+
+        var quantErr = run.Success ? run.Result!.QRmsMm : double.NaN;
+        // 整像素量化：每个坐标最多 0.5 px = 0.0226 mm，视差只取其中一部分
+        Check("整数像素 → 视差落在量化量级", run.Success && quantErr < 0.05,
+            $"q_rms {quantErr:0.0000} mm（半个像元 {0.5 * pixelMm:0.0000} mm）");
+
+        Check("结果写进像对", run.Success && project1.Pairs.Count == 1 &&
+                             project1.Pairs[0].Relative is not null,
+            project1.Pairs.Count == 1
+                ? $"{project1.Pairs[0].Id} 基准 {project1.Pairs[0].Relative?.ReferenceImageId}　" +
+                  $"φ {project1.Pairs[0].Relative?.Phi2:0.0000}°"
+                : $"像对 {project1.Pairs.Count} 个");
+
+        var pair1 = project1.Pairs.FirstOrDefault();
+        Check("像对里的元素与解算结果一致",
+            pair1?.Relative is { } rel &&
+            Math.Abs(rel.RmsQ - run.Result!.QRmsMm) < 1e-15 &&
+            Math.Abs(rel.Sigma0Mm - run.Result.Sigma0Mm) < 1e-15 &&
+            rel.UsedCount == run.Result.UsedCount,
+            pair1?.Relative is { } rr ? $"q_rms {rr.RmsQ:0.000000}　σ₀ {rr.Sigma0Mm:0.000000}" : "没有像对");
+
+        Check("逐点 q 写进同名点",
+            project1.TiePoints.Count(t => t.Q is not null) == nPoints &&
+            project1.TiePoints.All(t => !t.Rejected),
+            $"有 q 的点 {project1.TiePoints.Count(t => t.Q is not null)} 个，" +
+            $"被剔除 {project1.TiePoints.Count(t => t.Rejected)} 个");
+
+        // ---- 3 存盘再读回：字段名与数值都得原样回来
+        var tempPath = Path.Combine(Path.GetTempPath(), "pgm-relative-selftest.pht");
+        string json;
+        Project reloaded;
+        try
+        {
+            ProjectFile.Save(project1, tempPath);
+            json = File.ReadAllText(tempPath);
+            reloaded = ProjectFile.Load(tempPath);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"FAIL  存盘/读回抛异常：{ex.Message}");
+            failures++;
+            Console.WriteLine();
+            Console.WriteLine($"SELFTEST FAIL ({failures})");
+            Environment.ExitCode = 1;
+            return;
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+
+        Check("存盘带上同名点与相对定向结果",
+            json.Contains("\"tiePoints\"", StringComparison.Ordinal) &&
+            json.Contains("\"boundTiePointId\"", StringComparison.Ordinal) &&
+            json.Contains("\"relative\"", StringComparison.Ordinal) &&
+            json.Contains("\"version\": 3", StringComparison.Ordinal),
+            $"文件 {json.Length} 字节");
+
+        Check("读回：同名点与绑定关系",
+            reloaded.TiePoints.Count == nPoints + 1 &&
+            reloaded.Images.Sum(i => i.Points.Count(p => p.BoundTiePointId is not null)) == 2 * nPoints + 1 &&
+            reloaded.LoadWarnings.Count == 0,
+            $"同名点 {reloaded.TiePoints.Count} 个　绑定 {reloaded.Images.Sum(i =>
+                i.Points.Count(p => p.BoundTiePointId is not null))} 处　" +
+            $"警告 {reloaded.LoadWarnings.Count} 条");
+
+        var reloadedRel = reloaded.Pairs.FirstOrDefault()?.Relative;
+        Check("读回：相对定向元素逐个相等",
+            reloadedRel is not null && pair1?.Relative is { } src &&
+            reloadedRel.Bx == src.Bx && reloadedRel.By == src.By && reloadedRel.Bz == src.Bz &&
+            reloadedRel.Phi2 == src.Phi2 && reloadedRel.Omega2 == src.Omega2 &&
+            reloadedRel.Kappa2 == src.Kappa2 && reloadedRel.RmsQ == src.RmsQ &&
+            reloadedRel.Sigma0Mm == src.Sigma0Mm && reloadedRel.Gauge == src.Gauge &&
+            reloadedRel.ReferenceImageId == src.ReferenceImageId,
+            reloadedRel is null ? "没有相对定向结果" : $"q_rms {reloadedRel.RmsQ:0.000000}　基准 {reloadedRel.ReferenceImageId}");
+
+        Check("读回：逐点 q 与剔除标记",
+            reloaded.TiePoints.Where(t => t.Q is not null).Select(t => t.Q!.Value)
+                .SequenceEqual(project1.TiePoints.Where(t => t.Q is not null).Select(t => t.Q!.Value)),
+            $"{reloaded.TiePoints.Count(t => t.Q is not null)} 个点有 q");
+
+        // 读回之后再解一次，元素应当一模一样（点表是唯一的输入）
+        var again = RelativeOrientationTask.Run(reloaded, reloaded.Images[0], reloaded.Images[1]);
+        Check("重开工程后再解一次，结果可复现",
+            again.Success && again.Result!.QRmsMm == run.Result!.QRmsMm &&
+            again.Result.PhiDeg == run.Result.PhiDeg,
+            again.Success ? $"q_rms {again.Result!.QRmsMm:0.000000000000000}" : again.Message);
+
+        // ---- 4 粗差
+        //
+        // 旁向像对（基线在 v 方向）的核面法向 ≈ (f, 0, x)，共面条件量的是右片点在 u-w
+        // 面里的偏差——所以粗差要造在**像素 I** 方向。造在 J 方向会几乎不进 q（实测偏
+        // 1 mm 只剩 0.014 mm 的残差），剔不出来不是判据的问题，是那个方向不敏感。
+        var outlier = MakeProject(nPoints);
+        outlier.Images[1].Points[nPoints - 1].PixelX += 44;      // ≈ 2 mm，约 44 个像元
+        var outlierRun = RelativeOrientationTask.Run(outlier, outlier.Images[0], outlier.Images[1]);
+        Check("2 mm 的粗差点被剔掉",
+            outlierRun.Success && outlierRun.Result!.RejectedCount == 1 &&
+            outlier.TiePoints.Count(t => t.Rejected) == 1,
+            outlierRun.Success
+                ? $"剔除 {outlierRun.Result!.RejectedCount}　参与 {outlierRun.Result.UsedCount}　" +
+                  $"提示 {outlierRun.Warnings.Count} 条"
+                : outlierRun.Message);
+        Check("剔除粗差后有提醒",
+            outlierRun.Warnings.Any(w => w.Contains("粗差")),
+            outlierRun.Warnings.Count > 0 ? outlierRun.Warnings[0] : "没有提醒");
+
+        // ---- 5 闸门
+        var p5 = MakeProject(5);
+        Check("只有 5 对被拒",
+            RelativeOrientationTask.Run(p5, p5.Images[0], p5.Images[1]).Failure
+                == RelativeFailure.NotEnoughTiePoints,
+            RelativeOrientationTask.Run(p5, p5.Images[0], p5.Images[1]).Message);
+
+        var p9 = MakeProject(nPoints);
+        Check("同一张片被拒",
+            RelativeOrientationTask.Run(p9, p9.Images[0], p9.Images[0]).Failure
+                == RelativeFailure.SameImage,
+            RelativeOrientationTask.Run(p9, p9.Images[0], p9.Images[0]).Message);
+
+        var noInterior = MakeProject(nPoints);
+        noInterior.Images[0].Interior = null;
+        Check("缺内定向被拒",
+            RelativeOrientationTask.Run(noInterior, noInterior.Images[0], noInterior.Images[1]).Failure
+                == RelativeFailure.NoInterior,
+            RelativeOrientationTask.Run(noInterior, noInterior.Images[0], noInterior.Images[1]).Message);
+
+        var otherCamera = MakeProject(nPoints);
+        otherCamera.Images[1].Interior = new InteriorOrientation { FocalLength = 153.0, PixelSizeMm = pixelMm };
+        Check("焦距不同被拒",
+            RelativeOrientationTask.Run(otherCamera, otherCamera.Images[0], otherCamera.Images[1]).Failure
+                == RelativeFailure.MismatchedFocalLength,
+            RelativeOrientationTask.Run(otherCamera, otherCamera.Images[0], otherCamera.Images[1]).Message);
+
+        Console.WriteLine();
+        Console.WriteLine(failures == 0 ? "SELFTEST PASS" : $"SELFTEST FAIL ({failures})");
+        Environment.ExitCode = failures == 0 ? 0 : 1;
+    }
+
+    private static double Rad(double deg) => deg * Math.PI / 180.0;
+
+    /// <summary>教材展开式 R = Rκ·Rω·Rφ（地面 → 像空间），与原生库同一个约定。</summary>
+    private static double[] RotFromAngles(double phi, double omega, double kappa)
+    {
+        var sp = Math.Sin(phi);
+        var cp = Math.Cos(phi);
+        var sw = Math.Sin(omega);
+        var cw = Math.Cos(omega);
+        var sk = Math.Sin(kappa);
+        var ck = Math.Cos(kappa);
+
+        return new[]
+        {
+            cp * ck - sp * sw * sk,  cw * sk,  sp * ck + cp * sw * sk,
+           -cp * sk - sp * sw * ck,  cw * ck, -sp * sk + cp * sw * ck,
+           -sp * cw,                -sw,      cp * cw,
+        };
+    }
+
+    private static double[] MatVec(double[] m, double[] v) => new[]
+    {
+        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+        m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
+    };
+
+    private static double[] MatMul(double[] a, double[] b)
+    {
+        var o = new double[9];
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+            }
+        }
+        return o;
+    }
+
+    private static double[] MatT(double[] a) => new[]
+    {
+        a[0], a[3], a[6],
+        a[1], a[4], a[7],
+        a[2], a[5], a[8],
+    };
+
+    private static double MatMaxDiff(double[] a, double[] b)
+    {
+        var worst = 0.0;
+        for (var i = 0; i < 9; i++) worst = Math.Max(worst, Math.Abs(a[i] - b[i]));
+        return worst;
     }
 
     private static void AbiCheck()
