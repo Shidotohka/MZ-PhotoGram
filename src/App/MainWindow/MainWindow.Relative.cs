@@ -422,9 +422,9 @@ public partial class MainWindow
 
         if (run.Warnings.Count > 0)
         {
-            table.Note = string.Join("\n", run.Warnings.Select(w => "⚠ " + w));
-            table.NoteWarn = true;
-            DiagSummary.Text = $"! 相对定向完成，但有 {run.Warnings.Count} 条提醒";
+            // 提醒的全文进日志：结果页只留「是什么」，解释摆在那里会盖住表
+            foreach (var warning in run.Warnings) Log("!", warning);
+            DiagSummary.Text = $"! 相对定向完成，但有 {run.Warnings.Count} 条提醒（见日志）";
             DiagSummary.Foreground = WarnBadge;
         }
         else

@@ -289,9 +289,9 @@ public partial class MainWindow
             Title = $"后方交会 · {image.Id}",
         };
 
-        table.Num("摄影中心 X", "X_S", r.Xs, "0.000", "m", "数学系：X 东");
-        table.Num("摄影中心 Y", "Y_S", r.Ys, "0.000", "m", "Y 北");
-        table.Num("摄影中心 Z", "Z_S", r.Zs, "0.000", "m", "Z 天顶");
+        table.Num("摄影中心 X", "X_S", r.Xs, "0.000", "m");
+        table.Num("摄影中心 Y", "Y_S", r.Ys, "0.000", "m");
+        table.Num("摄影中心 Z", "Z_S", r.Zs, "0.000", "m");
         table.Num("姿态角 φ", "φ", r.PhiDeg, "+0.000000;-0.000000", "°", "R = Rκ·Rω·Rφ");
         table.Num("姿态角 ω", "ω", r.OmegaDeg, "+0.000000;-0.000000", "°");
         table.Num("姿态角 κ", "κ", r.KappaDeg, "+0.000000;-0.000000", "°");
@@ -350,10 +350,10 @@ public partial class MainWindow
             Title = $"前方交会 · {run.Left?.Id} / {run.Right?.Id}",
         };
 
-        // 坐标统一在 Core 里换过轴，这里只给一套：数学系（X 东、Y 北、Z 天顶）
-        table.Num("交会点 X", "X", p.X, "0.000", "m", "数学系：X 东");
-        table.Num("交会点 Y", "Y", p.Y, "0.000", "m", "Y 北");
-        table.Num("交会点 Z", "Z", p.Z, "0.000", "m", "Z 天顶");
+        // 坐标统一在 Core 里换过轴，这里只给一套；不标是哪个系、也不解释怎么换的
+        table.Num("交会点 X", "X", p.X, "0.000", "m");
+        table.Num("交会点 Y", "Y", p.Y, "0.000", "m");
+        table.Num("交会点 Z", "Z", p.Z, "0.000", "m");
 
         table.Num("交会角", "γ", r.ConvergenceAngleDeg, "0.00", "°", "两条视线的夹角");
         table.Num("基线", "b", r.BaseLength, "0.000", "m");

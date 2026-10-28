@@ -194,9 +194,8 @@ public partial class MainWindow
 
         if (run.Warnings.Count > 0)
         {
-            table.Note = string.Join("\n", run.Warnings.Select(w => "⚠ " + w));
-            table.NoteWarn = true;
-            DiagSummary.Text = $"! 交会完成，但有 {run.Warnings.Count} 条提醒";
+            foreach (var warning in run.Warnings) Log("!", warning);
+            DiagSummary.Text = $"! 交会完成，但有 {run.Warnings.Count} 条提醒（见日志）";
             DiagSummary.Foreground = WarnBadge;
         }
         else

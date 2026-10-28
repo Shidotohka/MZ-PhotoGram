@@ -592,9 +592,6 @@
                             <RadioButton Content="日志" GroupName="Bottom" Tag="log"
                                          Style="{StaticResource BottomTab}" Checked="BottomTab_Checked"/>
                         </StackPanel>
-                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="11"
-                                   Foreground="{StaticResource DimBrush}"
-                                   Text="校验体系：数据完整性 · 几何条件 · 计算过程"/>
                     </DockPanel>
                 </Border>
 
