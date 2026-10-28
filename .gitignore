@@ -42,3 +42,8 @@ Desktop.ini
 
 # ===== 迁移期的仓库备份（bundle + 旧 .git）。确认无误后可整个删掉 =====
 /.git-backup/
+
+# ===== 测试数据 ======
+/Data/
+
+/Design/
