@@ -209,6 +209,7 @@ public partial class MainWindow
 
             ShowResult(FailTable($"内定向 · {image.Id}",
                 $"（{result.ErrorCode}）{result.Message}" + (hint.Length > 0 ? "\n" + hint : "")));
+            LogSolve("内定向", image.Id, false, $"rc = {result.ErrorCode}　{result.Message}");
             DiagSummary.Text = $"✗ 内定向失败：{result.Message}";
             DiagSummary.Foreground = ErrBadge;
             return;
@@ -226,10 +227,15 @@ public partial class MainWindow
 
         // 结果与逐点残差进「结果残差」页，右栏不再摆结果
         ShowResult(InteriorResult(image, result));
+
+        LogSolve("内定向", image.Id, true,
+            $"δ {result.PixelSizeMm:0.000000} mm/px　σ₀ {result.Sigma0Mm:0.000000} mm　" +
+            $"框标 {result.UsedCount} 个　多余观测 {result.Redundancy}");
+
         var warn = result.Sigma0Mm > 0.02;
         DiagSummary.Text = warn
-            ? $"! 内定向完成，但 σ0 = {result.Sigma0Mm:0.0000} mm 偏大，检查残差最大的框标"
-            : $"✓ 内定向完成：δ = {result.PixelSizeMm:0.000000} mm/px，σ0 = {result.Sigma0Mm:0.0000} mm";
+            ? $"! 内定向完成，但 σ₀ 偏大（{result.Sigma0Mm:0.0000} mm），检查残差最大的框标"
+            : "✓ 内定向完成";
         DiagSummary.Foreground = warn ? WarnBadge : OkBadge;
 
         OnImageLoaded(null, image);

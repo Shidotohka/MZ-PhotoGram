@@ -698,14 +698,12 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
+                        <!-- 标题只写「任务 · 对象」。成功/迭代几次这类过程信息归日志页 -->
                         <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="False">
                             <TextBlock x:Name="ResTitleText" DockPanel.Dock="Left"
                                        FontSize="11.5" VerticalAlignment="Center"
                                        Foreground="{StaticResource MutBrush}"
                                        Text="结果残差 · 尚未解算"/>
-                            <TextBlock x:Name="ResSummaryText" DockPanel.Dock="Right"
-                                       FontSize="11" VerticalAlignment="Center"
-                                       Foreground="{StaticResource DimBrush}"/>
                         </DockPanel>
 
                         <Grid Grid.Row="1">
@@ -747,9 +745,20 @@
                                    FontSize="11.5" Foreground="{StaticResource DimBrush}"
                                    Text="尚未解算"/>
                     </Grid>
-                    <TextBlock x:Name="LogPanel" Visibility="Collapsed"
-                               FontSize="12" FontFamily="Consolas" Foreground="{StaticResource DimBrush}"
-                               Text="14:02:11  [OK]  打开工程 教学实验_01.pht"/>
+                    <!-- 日志：解算过程（迭代次数、σ₀、条件数、对象）都记在这里，
+                         不在结果页上占地方；诊断页只留"要你处理的那句话" -->
+                    <ScrollViewer x:Name="LogPanel" Visibility="Collapsed"
+                                  VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="LogList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="11.5"
+                                               Foreground="{StaticResource MutBrush}"
+                                               TextWrapping="Wrap" Margin="0,0,0,2"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </Grid>
             </DockPanel>
         </Border>

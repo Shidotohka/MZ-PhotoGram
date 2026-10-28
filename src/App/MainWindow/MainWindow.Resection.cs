@@ -70,6 +70,9 @@ public partial class MainWindow
             SetBusy(false, null);
         }
 
+        if (run.Failure != ResectionFailure.None)
+            LogSolve("后方交会", CurrentImage?.Id ?? "—", false, run.Message);
+
         switch (run.Failure)
         {
             case ResectionFailure.NoImage:
@@ -100,14 +103,16 @@ public partial class MainWindow
 
         var result = run.Result!;
         var image = CurrentImage!;
-        var evidence = run.Evidence!;
 
-        // 外方位与逐点残差进「结果残差」页；轴序证据跟着结果一起摆，免得外方位正负被误读
-        ShowResult(ResectionResult(image, result, evidence));
+        // 外方位与逐点残差进「结果残差」页；坐标系的统一（判手性、换轴）在 Core 里做完就算完，
+        // 界面上只给一套数学系坐标，不再解释是怎么换过来的
+        ShowResult(ResectionResult(image, result));
 
-        DiagSummary.Text = $"✓ 后方交会完成：迭代 {result.Iterations} 次，σ₀ = " +
-                           $"{result.Sigma0Mm:0.0000} mm，摄影距离约 {result.MeanRangeM:0} m，" +
-                           $"{GroundAxes.Describe(evidence.Order)}";
+        LogSolve("后方交会", image.Id, true,
+            $"迭代 {result.Iterations} 次　σ₀ {result.Sigma0Mm:0.0000} mm　" +
+            $"条件数 {result.Condition:0.#}　多余观测 {result.Redundancy}");
+
+        DiagSummary.Text = "✓ 后方交会完成";
         DiagSummary.Foreground = OkBadge;
 
         RefreshPointTable();

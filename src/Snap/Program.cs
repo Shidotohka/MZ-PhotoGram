@@ -1031,6 +1031,28 @@ internal static class Program
             ? $"[PASS] 逐点残差全为 0（最大 {worst:E1} mm）"
             : $"[FAIL] 逐点残差最大 {worst:E3} mm，框标是精确反算的，不该有残差");
         if (!(worst < 1e-6)) Environment.ExitCode = 1;
+
+        CheckProcessInfo(win, "内定向");
+    }
+
+    /// <summary>
+    /// 过程信息（成功与否、迭代几次）不该占结果页：结果页只有「任务 · 对象」，
+    /// 迭代/σ₀/条件数进日志页。这条检查两件事都盯住。
+    /// </summary>
+    private static void CheckProcessInfo(MainWindow win, string module)
+    {
+        var title = win.SnapshotResult().Title;
+        var clean = !title.Contains("成功") && !title.Contains("迭代") && !title.Contains("轮");
+        Console.WriteLine(clean
+            ? $"[PASS] 结果页标题只有对象：{title}"
+            : $"[FAIL] 过程信息还留在结果页标题上：[{title}]");
+        if (!clean) Environment.ExitCode = 1;
+
+        var line = win.LogLines.LastOrDefault(l => l.Contains(module));
+        Console.WriteLine(line is not null
+            ? $"[PASS] 日志记了过程：{line}"
+            : $"[FAIL] 日志里没有{module}的记录");
+        if (line is null) Environment.ExitCode = 1;
     }
 
     /// <summary>
@@ -1156,6 +1178,8 @@ internal static class Program
             ? "[PASS] 解完自动切到「结果残差」页"
             : "[FAIL] 没切到结果页，用户看不到结果");
         if (tab?.IsChecked != true) Environment.ExitCode = 1;
+
+        CheckProcessInfo(win, "前方交会");
     }
 
     /// <summary>
@@ -1322,6 +1346,8 @@ internal static class Program
         if (shownQ != expectQ) Environment.ExitCode = 1;
 
         Console.WriteLine($"[PASS] 结果写进了像对：{win.CurrentProject.Pairs.Count} 个像对");
+
+        CheckProcessInfo(win, "相对定向");
     }
 
     private static void RunM3(MainWindow win, ImageItem image, string gcpFile)    {
@@ -1418,6 +1444,8 @@ internal static class Program
         Console.WriteLine(xsRow?.Value == expectXs
             ? $"[PASS] 摄影中心 X 显示 {xsRow!.Value} m（与解算结果一致）"
             : $"[FAIL] 摄影中心 X 显示 [{xsRow?.Value}]，解算结果是 {expectXs}");
+
+        CheckProcessInfo(win, "后方交会");
 
         // 截图上要看得见点表与放大影像：选中一个控制点、切回点表页
         if (gcps.Count > 0) Console.WriteLine($"选中点表行 {gcps[0].Id}: {win.SelectGcp(gcps[0].Id)}");

@@ -407,12 +407,18 @@ public partial class MainWindow
         if (!run.Success)
         {
             ShowResult(FailTable($"相对定向 · {left?.Id ?? "—"} → {right?.Id ?? "—"}", run.Message));
+            LogSolve("相对定向", $"{left?.Id ?? "—"} → {right?.Id ?? "—"}", false, run.Message);
             DiagSummary.Text = "✗ " + run.Message;
             DiagSummary.Foreground = ErrBadge;
             return run;
         }
 
         var table = RelativeResultTable(run);
+        var r = run.Result!;
+
+        LogSolve("相对定向", $"{left?.Id} → {right?.Id}", true,
+            $"{r.Iterations} 轮　{r.UsedCount}/{run.Pairs.Count} 对　σ₀ {r.Sigma0Mm:0.0000} mm　" +
+            $"q_rms {r.QRmsMm:0.0000} mm　条件数 {r.Condition:0.0E+0}　冻结 {GaugeName(r.Gauge)}");
 
         if (run.Warnings.Count > 0)
         {
@@ -423,8 +429,7 @@ public partial class MainWindow
         }
         else
         {
-            DiagSummary.Text = $"✓ 相对定向完成：{run.Result!.Iterations} 轮，" +
-                               $"q 中误差 {run.Result.QRmsMm:0.0000} mm";
+            DiagSummary.Text = "✓ 相对定向完成";
             DiagSummary.Foreground = OkBadge;
         }
 

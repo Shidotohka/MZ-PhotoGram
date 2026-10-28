@@ -179,6 +179,7 @@ public partial class MainWindow
         {
             ShowResult(FailTable(
                 $"前方交会 · {_interLeftImage?.Id ?? "—"} / {_interRightImage?.Id ?? "—"}", run.Message));
+            LogSolve("前方交会", PairName(), false, run.Message);
             DiagSummary.Text = "✗ " + run.Message;
             DiagSummary.Foreground = ErrBadge;
             return run;
@@ -186,6 +187,10 @@ public partial class MainWindow
 
         var result = run.Result!;
         var table = IntersectionResult(run);
+
+        LogSolve("前方交会", PairName(), true,
+            $"交会角 {result.ConvergenceAngleDeg:0.00}°　基线 {result.BaseLength:0.0} m　" +
+            $"上下视差 {result.VerticalParallaxMm:0.0000} mm　m_XY {Math.Max(result.MX, result.MY):0.000} m");
 
         if (run.Warnings.Count > 0)
         {
@@ -196,14 +201,17 @@ public partial class MainWindow
         }
         else
         {
-            DiagSummary.Text = $"✓ 前方交会完成：交会角 {result.ConvergenceAngleDeg:0.00}°，" +
-                               $"m_XY {Math.Max(result.MX, result.MY):0.000} m、m_Z {result.MZ:0.000} m";
+            DiagSummary.Text = "✓ 前方交会完成";
             DiagSummary.Foreground = OkBadge;
         }
 
         ShowResult(table);
         return run;
     }
+
+    /// <summary>像对的名字：日志与结果标题共用一套写法。</summary>
+    private string PairName() =>
+        $"{_interLeftImage?.Id ?? "—"} / {_interRightImage?.Id ?? "—"}";
 
     private static ImagePixel? PixelOf(ImagePoint? point) =>
         point is { } p ? new ImagePixel(p.PixelX, p.PixelY) : null;

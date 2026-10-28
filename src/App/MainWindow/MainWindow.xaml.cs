@@ -146,6 +146,7 @@ public partial class MainWindow : Window
         DiagSummary.Text = "诊断 · 新建工程";
         DiagSummary.Foreground = DimBadge;
         ClearResult();
+        Log("OK", "新建工程");
     }
 
     private void SaveProjectAs_Click(object sender, RoutedEventArgs e)
@@ -201,6 +202,8 @@ public partial class MainWindow : Window
 
             // 打开工程后先把第一张可用影像放进工作区，避免空白窗口
             var first = project.Images.FirstOrDefault(i => i.FileState == ImageFileState.Ok);
+            Log("OK", $"打开工程　{Path.GetFileName(path)}　影像 {project.Images.Count} 张" +
+                      (missing > 0 ? $"（{missing} 张缺失）" : ""));
             if (first is not null) await LoadItemAsync(first);
         }
         catch (Exception ex)
@@ -231,6 +234,7 @@ public partial class MainWindow : Window
             ProjectFile.Save(_project, path);
             _projectPath = path;
             UpdateProjectTitle();
+            Log("OK", $"保存工程　{Path.GetFileName(path)}");
         }
         catch (Exception ex)
         {

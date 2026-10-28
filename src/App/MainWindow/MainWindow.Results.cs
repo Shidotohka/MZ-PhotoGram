@@ -23,6 +23,10 @@ namespace Photogrammetry.App;
 /// 哪个像对。改了观测（删点、补点）不会自动重算，要再按一次解算——这和作业员的预期一致，
 /// 没有人希望删一个点之后结论悄悄变了。
 /// </para>
+/// <para>
+/// 标题上<b>只有「任务 · 对象」</b>：成功与否、迭代几次、什么时刻，都进日志
+/// （<see cref="Log"/>）。过程信息摆在结果页上，人会把它们当成结果的一部分去引用。
+/// </para>
 /// </summary>
 public partial class MainWindow
 {
@@ -55,16 +59,15 @@ public partial class MainWindow
     internal sealed class ResultTable
     {
         public string Title { get; init; } = "结果残差";
-        public string Summary { get; init; } = string.Empty;
 
-        /// <summary>整份结果不可信（没收敛、被判不采用）。标题与摘要染成错误色。</summary>
+        /// <summary>整份结果不可信（没收敛、被判不采用）。标题染成错误色，并写「未解出」。</summary>
         public bool Warn { get; init; }
 
         public List<ResultRow> Items { get; } = new();
         public List<string> Headers { get; } = new();
         public List<ResidualRow> Rows { get; } = new();
 
-        /// <summary>页脚：口径说明、轴序、警告。比塞进表格更容易读。调用方可以补写（例如把解算提醒拼进去）。</summary>
+        /// <summary>页脚：口径与警告（敢不敢用这份结果）。比塞进表格更容易读。调用方可以补写（例如把解算提醒拼进去）。</summary>
         public string Note { get; set; } = string.Empty;
         public bool NoteWarn { get; set; }
 
@@ -105,7 +108,6 @@ public partial class MainWindow
     {
         ResTitleText.Text = table.Title;
         ResTitleText.Foreground = table.Warn ? ErrBadge : MutBadge;
-        ResSummaryText.Text = table.Summary;
 
         ResultGrid.ItemsSource = table.Items;
         BuildResidualColumns(table.Headers);
@@ -162,7 +164,6 @@ public partial class MainWindow
 
         ResTitleText.Text = "结果残差 · 尚未解算";
         ResTitleText.Foreground = MutBadge;
-        ResSummaryText.Text = string.Empty;
         ResNoteText.Text = string.Empty;
         ResNoteText.Visibility = Visibility.Collapsed;
         ResEmptyText.Visibility = Visibility.Visible;
@@ -200,7 +201,6 @@ public partial class MainWindow
     /// <summary>当前结果页上有什么。给 Snap 用——它验的是"界面真的显示了这几行"，不是"算对了"。</summary>
     internal sealed record ResultSnapshot(
         string Title,
-        string Summary,
         IReadOnlyList<ResultRow> Items,
         IReadOnlyList<string> Headers,
         IReadOnlyList<ResidualRow> Rows,
@@ -208,16 +208,12 @@ public partial class MainWindow
 
     internal ResultSnapshot SnapshotResult() => new(
         ResTitleText.Text,
-        ResSummaryText.Text,
         ResultGrid.ItemsSource is IEnumerable<ResultRow> items ? items.ToList() : Array.Empty<ResultRow>(),
         ResidualGrid.Columns.Select(c => c.Header?.ToString() ?? string.Empty).ToList(),
         ResidualGrid.ItemsSource is IEnumerable<ResidualRow> rows ? rows.ToList() : Array.Empty<ResidualRow>(),
         ResNoteText.Text);
 
     // ===================== 各模块的结果表 =====================
-
-    private static string Now() => DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-
     private static string Fmt(double value, string format) => Format.Fixed(value, format);
 
     /// <summary>带正负号的写法，角元素与残差用。</summary>
@@ -235,8 +231,8 @@ public partial class MainWindow
     {
         var table = new ResultTable
         {
-            Title = title,
-            Summary = (notAdopted ? "未采用　" : "未解出　") + Now(),
+            // 失败必须写在标题上：结果页是快照，翻回来的人先看到的就是标题这一行
+            Title = title + (notAdopted ? " · 未采用" : " · 未解出"),
             Warn = true,
             Note = message,
             NoteWarn = true,
@@ -253,7 +249,6 @@ public partial class MainWindow
         var table = new ResultTable
         {
             Title = $"内定向 · {image.Id}",
-            Summary = $"成功　框标 {r.UsedCount} 个　σ₀ {Fmt(r.Sigma0Mm, "0.000000")} mm　{Now()}",
         };
 
         table.Num("比例尺（I 向）", "s_x", r.SxMm, "0.000000", "mm/px");
@@ -287,14 +282,11 @@ public partial class MainWindow
 
     // ---------- 后方交会 ----------
 
-    private static ResultTable ResectionResult(ImageItem image, ResectionResult r,
-        GroundOrderEvidence? evidence)
+    private static ResultTable ResectionResult(ImageItem image, ResectionResult r)
     {
         var table = new ResultTable
         {
             Title = $"后方交会 · {image.Id}",
-            Summary = $"成功　迭代 {r.Iterations} 次　σ₀ {Fmt(r.Sigma0Mm, "0.0000")} mm　{Now()}",
-            Note = evidence is null ? string.Empty : evidence.Describe() + "。",
         };
 
         table.Num("摄影中心 X", "X_S", r.Xs, "0.000", "m", "数学系：X 东");
@@ -313,7 +305,6 @@ public partial class MainWindow
         table.Add("参与控制点", "n",
             (r.Residuals.Count).ToString(CultureInfo.InvariantCulture), "个");
         table.Add("多余观测", "r", r.Redundancy.ToString(CultureInfo.InvariantCulture), "", "2n − 6");
-        table.Add("迭代", "—", r.Iterations.ToString(CultureInfo.InvariantCulture), "次");
         table.Add("条件数", "cond", Fmt(r.Condition, "0.0E+0"), "", "越大越病态");
         table.Num("摄影距离", "—", r.MeanRangeM, "0", "m", "到各控制点的平均");
 
@@ -357,20 +348,12 @@ public partial class MainWindow
         var table = new ResultTable
         {
             Title = $"前方交会 · {run.Left?.Id} / {run.Right?.Id}",
-            Summary = $"成功　交会角 {Fmt(r.ConvergenceAngleDeg, "0.00")}°　{Now()}",
         };
 
+        // 坐标统一在 Core 里换过轴，这里只给一套：数学系（X 东、Y 北、Z 天顶）
         table.Num("交会点 X", "X", p.X, "0.000", "m", "数学系：X 东");
         table.Num("交会点 Y", "Y", p.Y, "0.000", "m", "Y 北");
         table.Num("交会点 Z", "Z", p.Z, "0.000", "m", "Z 天顶");
-
-        // 控制点文件若是 X 指北的写法，两个片轴序一致时才给换算，否则宁可不给
-        if (run.Left?.GroundOrder == GroundAxisOrder.NorthEast &&
-            run.Right?.GroundOrder == GroundAxisOrder.NorthEast)
-        {
-            table.Num("按文件轴序 X", "X", p.Y, "0.000", "m", "控制点文件 X 指北");
-            table.Num("按文件轴序 Y", "Y", p.X, "0.000", "m", "");
-        }
 
         table.Num("交会角", "γ", r.ConvergenceAngleDeg, "0.00", "°", "两条视线的夹角");
         table.Num("基线", "b", r.BaseLength, "0.000", "m");
@@ -406,8 +389,6 @@ public partial class MainWindow
         var table = new ResultTable
         {
             Title = $"相对定向 · {run.Left?.Id} → {run.Right?.Id}",
-            Summary = $"成功　{r.Iterations} 轮　{r.UsedCount}/{run.Pairs.Count} 对　" +
-                      $"q_rms {Fmt(r.QRmsMm, "0.0000")} mm　{Now()}",
         };
 
         table.Num("基线", "b_x", r.Bx, "+0.0000000;-0.0000000", "", "单位基线方向，|b| = 1");
@@ -432,7 +413,6 @@ public partial class MainWindow
         table.Num("q 中误差", "q_rms", r.QRmsMm, "0.0000", "mm");
         table.Num("最大 |q|", "q_max", r.QMaxAbsMm, "0.0000", "mm");
         table.Num("单位权中误差", "σ₀", r.Sigma0Mm, "0.0000", "mm");
-        table.Add("迭代", "—", r.Iterations.ToString(CultureInfo.InvariantCulture), "轮");
         table.Add("参与 / 总数", "—",
             $"{r.UsedCount} / {run.Pairs.Count}", "对",
             r.RejectedCount > 0 ? $"剔除 {r.RejectedCount} 个" : "");
