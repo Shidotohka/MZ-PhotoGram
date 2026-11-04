@@ -20,6 +20,29 @@
     </None>
   </ItemGroup>
 
+  <!-- 匹配模块（第二个 DLL）与 OpenCV 运行时。没装 vcpkg 时静默跳过：
+       其余算法照常，只有「自动匹配」会提示 photogrammetry_cv.dll 找不到。 -->
+  <PropertyGroup>
+    <NativeMatchDll>$(MSBuildThisFileDirectory)..\native\build\bin\Release\photogrammetry_cv.dll</NativeMatchDll>
+    <VcpkgRuntimeBin Condition="'$(VcpkgRuntimeBin)' == ''">C:\vcpkg\installed\x64-windows\bin</VcpkgRuntimeBin>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(NativeMatchDll)')">
+    <None Include="$(NativeMatchDll)">
+      <Link>photogrammetry_cv.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(VcpkgRuntimeBin)\opencv_core4.dll')">
+    <None Include="$(VcpkgRuntimeBin)\opencv_*.dll;$(VcpkgRuntimeBin)\z.dll;$(VcpkgRuntimeBin)\jpeg62.dll;$(VcpkgRuntimeBin)\libpng16.dll;$(VcpkgRuntimeBin)\tiff.dll;$(VcpkgRuntimeBin)\liblzma.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
   <Target Name="WarnMissingNativeAlgorithmDll" BeforeTargets="Build"
           Condition="!Exists('$(NativeAlgorithmDll)')">
     <Message Importance="high"

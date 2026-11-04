@@ -80,6 +80,16 @@ public static class CoordinateConverter
         return new ImagePointMm(x, y);
     }
 
+    /// <summary>像素坐标（允许小数）→ 像平面坐标。亚像素匹配点走这一条。</summary>
+    public static ImagePointMm PixelToImagePlane(
+        double i, double j, InteriorOrientation io, int width, int height)
+    {
+        ArgumentNullException.ThrowIfNull(io);
+        var x = (i - width / 2.0) * io.PixelSizeMm - io.X0;
+        var y = -(j - height / 2.0) * io.PixelSizeMm - io.Y0;
+        return new ImagePointMm(x, y);
+    }
+
     /// <summary>像平面坐标 → 像素坐标（用于在影像上回绘点位）。</summary>
     public static ImagePixel ImagePlaneToPixel(
         ImagePointMm point, InteriorOrientation io, int width, int height)

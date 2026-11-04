@@ -225,4 +225,62 @@ internal static class NativeAbi
     internal static extern int pgm_relative_orientation(
         ref RelativeInput input, ref RelativeOutput output);
 
+    // ---------------------------------------------------------------- 计算机视觉匹配
+
+    /// <summary>
+    /// 匹配模块的 DLL 名。与 <see cref="Library"/> 分开：这个 DLL 链接 OpenCV，
+    /// 只在匹配时加载，缺了不影响其他算法（见 ADR-22）。
+    /// </summary>
+    internal const string LibraryCv = "photogrammetry_cv";
+
+    /// <summary>成功返回码，与 C 侧的 <c>PGM_OK</c> 对应。</summary>
+    internal const int Ok = 0;
+
+    /// <summary>核线几何的输入（与 <c>pgm_epipolar_input</c> 逐字段对应）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CvEpipolar
+    {
+        public double Bx, By, Bz;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 9)]
+        public double[] Rotation;
+
+        public double FocalLengthMm;
+    }
+
+    /// <summary>一次匹配的输入（与 <c>pgm_cv_match_input</c> 逐字段对应）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CvMatchInput
+    {
+        public IntPtr LeftPixels;
+        public int LeftWidth, LeftHeight, LeftStep;
+
+        public IntPtr RightPixels;
+        public int RightWidth, RightHeight, RightStep;
+
+        public double PixelSizeMm;
+        public double CxLeft, CyLeft;
+        public double CxRight, CyRight;
+
+        public int UseEpipolar;
+        public CvEpipolar Epipolar;
+
+        public double Ratio;
+        public double EpipolarToleranceMm;
+    }
+
+    [DllImport(LibraryCv, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int pgm_cv_match(
+        ref CvMatchInput input, int capacity,
+        double[] outLeftI, double[] outLeftJ,
+        double[] outRightI, double[] outRightJ,
+        double[] outScore, double[] outEpipolarMm,
+        out int outCount, out int outInliers, out int outDetected);
+
+    [DllImport(LibraryCv, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr pgm_cv_version();
+
+    [DllImport(LibraryCv, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr pgm_cv_last_error();
+
 }

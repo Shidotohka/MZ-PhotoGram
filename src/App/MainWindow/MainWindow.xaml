@@ -501,6 +501,11 @@
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
 
+                                        <Button x:Name="IntersectionAutoButton" Content="自动匹配并交会"
+                                                Click="AutoMatchIntersect_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+
                                         <Button Content="清空配对" Click="ClearIntersectionPair_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>

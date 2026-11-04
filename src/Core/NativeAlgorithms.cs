@@ -1094,4 +1094,126 @@ public static class NativeAlgorithms
         Marshal.Copy(values, 0, p, values.Length);
         return p;
     }
+
+    // ---------------------------------------------------------------- 计算机视觉匹配
+
+    /// <summary>一组同名点：两边的像元坐标（列、行，可为小数）。</summary>
+    public sealed record MatchPoint(double LeftI, double LeftJ, double RightI, double RightJ,
+                                    double Score, double EpipolarMm);
+
+    /// <summary>一次匹配的输出。Points 已按描述子距离从优到劣排好。</summary>
+    public sealed class MatchOutcome
+    {
+        /// <summary>匹配上的点对。</summary>
+        public required IReadOnlyList<MatchPoint> Points { get; init; }
+
+        /// <summary>RANSAC 判为内点的对数。</summary>
+        public int Inliers { get; init; }
+
+        /// <summary>两片检出特征数取小者。太小说明图太平坦，不是匹配算法的问题。</summary>
+        public int Detected { get; init; }
+    }
+
+    /// <summary>
+    /// 调 <c>photogrammetry_cv.dll</c> 做特征匹配：SIFT → 比值检验 → 互为最佳 →（可选）核线过滤 → RANSAC。
+    ///
+    /// <para>两幅灰度缓冲必须是 8 位，step 是每行字节数。缓冲区在这里被钉住（GCHandle），
+    /// 一次调用把整幅图交给 C++——**不要在 C# 里逐点调**（§8.2）。</para>
+    ///
+    /// <para>找不到 <c>photogrammetry_cv.dll</c> 时抛 <see cref="InvalidOperationException"/>，
+    /// 由调用方转成「匹配模块不可用」的提示；其他模块不受影响。</para>
+    /// </summary>
+    public static MatchOutcome MatchFeatures(
+        byte[] left, int leftWidth, int leftHeight, int leftStep,
+        byte[] right, int rightWidth, int rightHeight, int rightStep,
+        double pixelSizeMm,
+        (double Cx, double Cy) leftPrincipal,
+        (double Cx, double Cy) rightPrincipal,
+        (double Bx, double By, double Bz, double[] Rotation, double FocalLengthMm)? epipolar,
+        int capacity = 2000,
+        double ratio = 0.8,
+        double epipolarToleranceMm = 0.10)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+
+        var li = new double[capacity];
+        var lj = new double[capacity];
+        var ri = new double[capacity];
+        var rj = new double[capacity];
+        var score = new double[capacity];
+        var epi = new double[capacity];
+
+        var leftHandle = GCHandle.Alloc(left, GCHandleType.Pinned);
+        var rightHandle = GCHandle.Alloc(right, GCHandleType.Pinned);
+        try
+        {
+            var input = new NativeAbi.CvMatchInput
+            {
+                LeftPixels = leftHandle.AddrOfPinnedObject(),
+                LeftWidth = leftWidth,
+                LeftHeight = leftHeight,
+                LeftStep = leftStep,
+                RightPixels = rightHandle.AddrOfPinnedObject(),
+                RightWidth = rightWidth,
+                RightHeight = rightHeight,
+                RightStep = rightStep,
+                PixelSizeMm = pixelSizeMm,
+                CxLeft = leftPrincipal.Cx,
+                CyLeft = leftPrincipal.Cy,
+                CxRight = rightPrincipal.Cx,
+                CyRight = rightPrincipal.Cy,
+                Ratio = ratio,
+                EpipolarToleranceMm = epipolarToleranceMm,
+                UseEpipolar = epipolar is null ? 0 : 1,
+                Epipolar = epipolar is { } e
+                    ? new NativeAbi.CvEpipolar
+                    {
+                        Bx = e.Bx, By = e.By, Bz = e.Bz,
+                        Rotation = e.Rotation,
+                        FocalLengthMm = e.FocalLengthMm,
+                    }
+                    : new NativeAbi.CvEpipolar { Rotation = new double[9] },
+            };
+
+            int count, inliers, detected, rc;
+            try
+            {
+                rc = NativeAbi.pgm_cv_match(ref input, capacity, li, lj, ri, rj, score, epi,
+                                            out count, out inliers, out detected);
+            }
+            catch (DllNotFoundException ex)
+            {
+                throw new InvalidOperationException(
+                    "找不到 photogrammetry_cv.dll。匹配模块要带 OpenCV 单独构建：\n" +
+                    "  cmake -S native -B native/build -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake\n" +
+                    "  cmake --build native/build --config Release", ex);
+            }
+            catch (EntryPointNotFoundException ex)
+            {
+                throw new InvalidOperationException(
+                    "photogrammetry_cv.dll 版本不对（缺少 pgm_cv_match），重新编一次 native。", ex);
+            }
+
+            if (rc != NativeAbi.Ok)
+            {
+                var message = Marshal.PtrToStringUTF8(NativeAbi.pgm_cv_last_error()) ?? "匹配失败";
+                throw new InvalidOperationException(message);
+            }
+
+            var points = new List<MatchPoint>(count);
+            for (var k = 0; k < count; k++)
+            {
+                points.Add(new MatchPoint(li[k], lj[k], ri[k], rj[k], score[k], epi[k]));
+            }
+
+            return new MatchOutcome { Points = points, Inliers = inliers, Detected = detected };
+        }
+        finally
+        {
+            leftHandle.Free();
+            rightHandle.Free();
+        }
+    }
 }

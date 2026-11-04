@@ -3,6 +3,8 @@ using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Photogrammetry.Core;
 using Photogrammetry.Core.Tasks;
 
@@ -211,6 +213,128 @@ public partial class MainWindow
     /// <summary>像对的名字：日志与结果标题共用一套写法。</summary>
     private string PairName() =>
         $"{_interLeftImage?.Id ?? "—"} / {_interRightImage?.Id ?? "—"}";
+
+    // ---------- 自动匹配（SIFT + 核线 + RANSAC → 逐点交会） ----------
+
+    /// <summary>
+    /// 不用手点：两张片各自解码成灰度，一次调 <see cref="AutoIntersectTask"/>，
+    /// 匹配出来的每一对都交会一次，然后把整批点摆进结果页。
+    /// </summary>
+    private async void AutoMatchIntersect_Click(object sender, RoutedEventArgs e)
+    {
+        var views = Workspace.VisibleViews().ToList();
+        if (views.Count != 2 || views[0].Image is not { } left || views[1].Image is not { } right)
+        {
+            DiagSummary.Text = "✗ 自动匹配要两张片：把左片拖进左窗、右片拖进右窗。";
+            DiagSummary.Foreground = ErrBadge;
+            return;
+        }
+
+        IntersectionAutoButton.IsEnabled = false;
+        SetBusy(true, "正在解码两张片…");
+        try
+        {
+            var leftSource = await EnsureBitmapAsync(left);
+            var rightSource = await EnsureBitmapAsync(right);
+            if (leftSource is null || rightSource is null) return;
+
+            SetBusy(true, "正在匹配…（SIFT 找特征，要几秒到几十秒）");
+            var lg = ToGray8(leftSource);
+            var rg = ToGray8(rightSource);
+
+            var run = await Task.Run(() => AutoIntersectTask.Run(
+                left, right, lg.Pixels, lg.Step, rg.Pixels, rg.Step));
+
+            ShowAutoIntersect(run, left, right);
+        }
+        catch (Exception ex)
+        {
+            DiagSummary.Text = "✗ 自动匹配失败：" + ex.Message;
+            DiagSummary.Foreground = ErrBadge;
+            LogSolve("自动匹配", PairName(), false, ex.Message);
+            MessageBox.Show(this, ex.Message, "自动匹配失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            SetBusy(false, null);
+            IntersectionAutoButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>把一次自动交会摆到结果页上：左边概要、右边逐点。</summary>
+    private void ShowAutoIntersect(AutoIntersectRun run, ImageItem left, ImageItem right)
+    {
+        var title = $"前方交会 · {left.Id} / {right.Id}";
+
+        if (!run.Success)
+        {
+            ShowResult(FailTable(title, run.Message));
+            LogSolve("自动匹配", PairName(), false, run.Message);
+            DiagSummary.Text = "✗ " + run.Message;
+            DiagSummary.Foreground = ErrBadge;
+            return;
+        }
+
+        var points = run.Points;
+        var angles = points.Select(p => p.Ground.ConvergenceAngleDeg).OrderBy(a => a).ToList();
+        var medianAngle = angles[angles.Count / 2];
+
+        var table = new ResultTable { Title = title }
+            .Num("匹配对", "n", run.Matched, "0", "对")
+            .Num("RANSAC 内点", "n", run.Inliers, "0", "对")
+            .Num("检出特征", "n", run.Detected, "0", "个")
+            .Num("交会成功", "n", points.Count, "0", "点")
+            .Num("交会失败", "n", run.Failed, "0", "对")
+            .Num("交会角中位数", "γ", medianAngle, "0.00", "°")
+            .Head("点号", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
+
+        const int kShown = 300;
+        for (var k = 0; k < points.Count && k < kShown; k++)
+        {
+            var p = points[k];
+            table.Row(
+                (k + 1).ToString(),
+                $"{p.LeftI:0.0}, {p.LeftJ:0.0}",
+                $"{p.RightI:0.0}, {p.RightJ:0.0}",
+                Fmt(p.Ground.Point.X, "0.000"),
+                Fmt(p.Ground.Point.Y, "0.000"),
+                Fmt(p.Ground.Point.Z, "0.000"),
+                Format.Fixed(p.Ground.ConvergenceAngleDeg, "0.00"));
+        }
+
+        if (points.Count > kShown)
+        {
+            table.Note = $"只列前 {kShown} 个点，共 {points.Count} 个。";
+        }
+
+        LogSolve("自动匹配", PairName(), true,
+            $"匹配 {run.Matched} 对　内点 {run.Inliers}　特征 {run.Detected}　" +
+            $"交会 {points.Count} 点（失败 {run.Failed}）　交会角中位 {medianAngle:0.00}°");
+
+        foreach (var warning in run.Warnings) Log("!", warning);
+
+        DiagSummary.Text = run.Warnings.Count == 0
+            ? $"✓ 自动交会完成，{points.Count} 个点"
+            : $"! 自动交会完成，{points.Count} 个点，有 {run.Warnings.Count} 条提醒（见日志）";
+        DiagSummary.Foreground = run.Warnings.Count == 0 ? OkBadge : WarnBadge;
+
+        ShowResult(table);
+    }
+
+    /// <summary>任意位图 → 8 位灰度缓冲（步长 = 宽度，因为每像素一字节）。</summary>
+    private static (byte[] Pixels, int Step) ToGray8(System.Windows.Media.Imaging.BitmapSource source)
+    {
+        System.Windows.Media.Imaging.BitmapSource gray = source.Format == PixelFormats.Gray8
+            ? source
+            : new FormatConvertedBitmap(source, PixelFormats.Gray8, null, 0);
+
+        var width = gray.PixelWidth;
+        var height = gray.PixelHeight;
+        var step = width;
+        var pixels = new byte[step * height];
+        gray.CopyPixels(pixels, step, 0);
+        return (pixels, step);
+    }
 
     private static ImagePixel? PixelOf(ImagePoint? point) =>
         point is { } p ? new ImagePixel(p.PixelX, p.PixelY) : null;
