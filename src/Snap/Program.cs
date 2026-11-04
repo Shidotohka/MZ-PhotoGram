@@ -1881,7 +1881,97 @@ internal static class Program
         Check("模型点有深度跨度（不是一张纸）", maxZ - minZ > 1e-6,
             $"ΔZ = {maxZ - minZ:0.0000}");
 
+        // ---- 6 基准片换成右片：走 FromRelative 里没被测过的那一支 ----
+        //
+        // 数学上两种摆法必须给出同一个 (b,R)：核线只认「哪张是左片、哪张是右片」，不认谁当基准。
+        // 左片为基准：R_l = I、b 就是 (Bx,By,Bz)，于是 R_pair = R_r、b_pair = R_l·b = b。
+        // 右片为基准：左片摆到 (b',R')，FromPoses 得 R_pair = I·R'ᵀ、b_pair = R'·(-b')。
+        // 代入 b' = R_右(X_左-X_右)、R' = R_左R_右ᵀ，两条各自化简都等于同一组 (R_r, b)——
+        // 所以这一支写错（漏转置、漏负号）不会「差一点」，会差整个几何。
+        var roSwapped = NativeAlgorithms.SolveRelativeOrientation(rmm, lmm, f);
+        Check("对调左右后仍能解出相对定向", roSwapped.Success,
+            roSwapped.Success
+                ? $"{roSwapped.Iterations} 轮　{roSwapped.UsedCount}/{plain.Points.Count} 参与　q_rms {roSwapped.QRmsMm:0.0000} mm"
+                : roSwapped.Message);
+
+        PairGeometry? geometryRightBase = null;
+        if (roSwapped.Success)
+        {
+            var relativeRightBase = new RelativeOrientation
+            {
+                ReferenceImageId = right.Id,      // ← 明确指定基准片是右片，逼 FromRelative 走另一支
+                Bx = roSwapped.Bx,
+                By = roSwapped.By,
+                Bz = roSwapped.Bz,
+                Phi2 = roSwapped.PhiDeg,
+                Omega2 = roSwapped.OmegaDeg,
+                Kappa2 = roSwapped.KappaDeg,
+                Gauge = roSwapped.Gauge,
+                FocalLength = f,
+                Sigma0Mm = roSwapped.Sigma0Mm,
+                RmsQ = roSwapped.QRmsMm,
+            };
+
+            geometryRightBase = PairGeometryBuilder.FromRelative(relativeRightBase, left, right);
+        }
+
+        // 下面五项无论前面成没成都照样记一次：中途失败不能让项数悄悄变少，
+        // 否则"全 PASS"可能只是剩下的项目少了几条。
+        Check("基准片是右片时也能拼出几何", geometryRightBase is not null,
+            geometryRightBase?.Source ?? "返回 null（相对定向没解出来）");
+
+        Check("来源里写明了「右片为基准」",
+            geometryRightBase is not null && geometryRightBase.Source.Contains("右片为基准"),
+            geometryRightBase?.Source ?? "没有几何");
+
+        // (b,R) 与左片为基准时一致：这是这一支对不对的判据，不是"跑通了"就算。
+        var db = double.NaN;
+        var dMax = double.NaN;
+        if (geometryRightBase is not null)
+        {
+            db = Math.Max(
+                Math.Abs(geometryRightBase.Epipolar.Bx - geometry.Epipolar.Bx),
+                Math.Max(Math.Abs(geometryRightBase.Epipolar.By - geometry.Epipolar.By),
+                         Math.Abs(geometryRightBase.Epipolar.Bz - geometry.Epipolar.Bz)));
+
+            dMax = 0.0;
+            for (var i = 0; i < 9; i++)
+            {
+                dMax = Math.Max(dMax, Math.Abs(geometryRightBase.Epipolar.Rotation[i] - geometry.Epipolar.Rotation[i]));
+            }
+        }
+
+        Check("两种基准摆出的 (b,R) 是同一组（Δb、ΔR < 1e-4）",
+            geometryRightBase is not null && db < 1e-4 && dMax < 1e-4,
+            geometryRightBase is null
+                ? "没有几何"
+                : $"Δb = {db:0.0e+0}　ΔR = {dMax:0.0e+0}（两次独立解算，差的是拟合噪声，不是几何）");
+
+        // 拿右片为基准的几何再去带核线重配：残差应与前者同量级——
+        // 上面比的是两次解算的差，这里比的是它跟真实像点的一致性，两件事都要过。
+        var epiRbCount = 0;
+        var medianRb = 0.0;
+        if (geometryRightBase is not null)
+        {
+            var constrainedRightBase = NativeAlgorithms.MatchFeatures(
+                lp, lw, lh, lw, rp, rw, rh, rw,
+                pixelMm, Principal(io, lw, lh), Principal(io, rw, rh),
+                (geometryRightBase.Epipolar.Bx, geometryRightBase.Epipolar.By, geometryRightBase.Epipolar.Bz,
+                 geometryRightBase.Epipolar.Rotation, f));
+
+            var epiRb = constrainedRightBase.Points.Select(p => p.EpipolarMm).OrderBy(v => v).ToList();
+            epiRbCount = epiRb.Count;
+            medianRb = epiRbCount == 0 ? 0.0 : epiRb[epiRbCount / 2];
+        }
+
+        Check("右片为基准时的核线残差与左片为基准时同量级（中位 < 0.05 mm）",
+            epiRbCount > 0 && medianRb < 0.05,
+            epiRbCount == 0
+                ? "一个都没配上"
+                : $"{epiRbCount} 对，中位 {medianRb:0.0000} mm（左片为基准时 {median:0.0000} mm）");
+
         Console.WriteLine();
+
         Console.WriteLine(failures == 0 ? "MATCH-RELATIVE PASS" : $"MATCH-RELATIVE FAIL（{failures} 项）");
         if (failures != 0) Environment.ExitCode = 1;
     }
