@@ -1,35 +1,80 @@
 <Window x:Class="Photogrammetry.App.MatchReportWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="匹配质量" Height="620" Width="720"
+        Title="匹配质量" Height="640" Width="760"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource BgBrush}" FontSize="12">
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <Window.Resources>
+        <Style TargetType="TabControl" BasedOn="{StaticResource ReportTabHost}"/>
+        <Style TargetType="TabItem" BasedOn="{StaticResource ReportTabItem}"/>
+    </Window.Resources>
+
+    <!-- 根元素不带 Margin：离屏截图（Snap 的 cloud-demo 开关）按根元素的布局位移截取，
+         Margin 挂在根上会让底部内容被切掉。留白交给 Border 的 Padding。 -->
+    <Border Padding="16">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
         <TextBlock x:Name="SummaryText" Grid.Row="0" TextWrapping="Wrap"
                    Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
 
-        <TextBlock Grid.Row="1" Text="核线残差（mm）——匹配点偏离核线多远"
-                   Foreground="{StaticResource DimBrush}" Margin="0,4,0,4"/>
-        <Border Grid.Row="2" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="4"
-                Padding="8" Margin="0,0,0,10">
-            <Canvas x:Name="ResidualCanvas" ClipToBounds="True"/>
-        </Border>
+        <TabControl x:Name="ReportTabs" Grid.Row="1">
+            <TabItem Header="直方图">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="3" Text="交会角（°）——两条视线张开多大"
-                   Foreground="{StaticResource DimBrush}" Margin="0,0,0,4"/>
-        <Border Grid.Row="4" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="4"
-                Padding="8">
-            <Canvas x:Name="AngleCanvas" ClipToBounds="True"/>
-        </Border>
-    </Grid>
+                    <TextBlock Grid.Row="0" Text="核线残差（mm）——匹配点偏离核线多远"
+                               Foreground="{StaticResource DimBrush}" Margin="0,0,0,4"/>
+                    <Border Grid.Row="1" Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="4"
+                            Padding="8" Margin="0,0,0,10">
+                        <Canvas x:Name="ResidualCanvas" ClipToBounds="True"/>
+                    </Border>
+
+                    <TextBlock Grid.Row="2" Text="交会角（°）——两条视线张开多大"
+                               Foreground="{StaticResource DimBrush}" Margin="0,0,0,4"/>
+                    <Border Grid.Row="3" Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="4"
+                            Padding="8">
+                        <Canvas x:Name="AngleCanvas" ClipToBounds="True"/>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="点云">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="4"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Image x:Name="CloudImage" Stretch="Fill"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                            <Canvas x:Name="CloudOverlay" Background="Transparent" ClipToBounds="True"/>
+                            <TextBlock x:Name="CloudEmpty" Text="没有交会点"
+                                       Foreground="{StaticResource DimBrush}" IsHitTestVisible="False"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock x:Name="CloudInfo" Grid.Row="1" FontSize="10"
+                               Foreground="{StaticResource MutBrush}" Margin="2,6,0,0"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
+        </Grid>
+    </Border>
 </Window>

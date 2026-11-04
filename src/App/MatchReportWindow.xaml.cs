@@ -5,15 +5,19 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Photogrammetry.Core;
 using Photogrammetry.Core.Tasks;
 
 namespace Photogrammetry.App;
 
 /// <summary>
-/// 匹配质量的独立窗口：一张核线残差直方图 + 一张交会角直方图。
+/// 匹配质量的独立窗口：两个页签——直方图（核线残差 + 交会角）与点云（交会出的三维散点）。
 ///
 /// <para>为什么要单开一个窗口：主窗五区已经占满，图表塞进结果页会把表格挤没；
-/// 而这两张图是"看一眼就关"的东西，不该常住。数据由 <see cref="AutoIntersectBatchRun"/> 给。</para>
+/// 而这里是"看一眼就关"的东西，不该常住。数据由 <see cref="AutoIntersectBatchRun"/> 给。</para>
+///
+/// <para>点云那一页看的是<b>稀疏连接点</b>——每点是一对同名点交会出来的结果，不是稠密点云。
+/// 它的用处是肉眼找整片错位、飞点、以及"是不是贴在一个面上"；数量对得上就说明定向站得住。</para>
 /// </summary>
 public partial class MatchReportWindow : Window
 {
@@ -22,6 +26,7 @@ public partial class MatchReportWindow : Window
     private static readonly Brush LabelBrush = new SolidColorBrush(Color.FromRgb(0x58, 0x63, 0x6E));
 
     private readonly IReadOnlyList<AutoIntersectPoint> _points;
+    private readonly PointCloudView _cloud;
 
     public MatchReportWindow(AutoIntersectBatchRun run)
     {
@@ -42,9 +47,29 @@ public partial class MatchReportWindow : Window
 
         ResidualCanvas.SizeChanged += (_, _) => Draw(ResidualCanvas, residuals, "mm");
         AngleCanvas.SizeChanged += (_, _) => Draw(AngleCanvas, angles, "°");
+
+        _cloud = new PointCloudView(CloudImage, CloudOverlay);
+        var ground = _points.Select(p => p.Ground.Point).ToList();
+        _cloud.SetPoints(ground);
+
+        if (ground.Count == 0)
+        {
+            CloudEmpty.Visibility = Visibility.Visible;
+            CloudInfo.Text = string.Empty;
+        }
+        else
+        {
+            CloudInfo.Text =
+                $"{ground.Count} 个交会点　" +
+                $"X {_cloud.ExtentX:0.#} m · Y {_cloud.ExtentY:0.#} m · Z {_cloud.ExtentZ:0.#} m　" +
+                "拖动旋转 · 滚轮缩放 · 双击复位";
+        }
+
+        // 切到点云页签时视图才第一次拿到真实尺寸，这里补一次重画（SizeChanged 通常已经管到，兜底）。
+        ReportTabs.SelectionChanged += (_, _) => _cloud.Render();
     }
 
-    /// <summary>等宽分箱后画柱状图，横轴标最小/中位/最大。</summary>
+    /// <summary>等宽分箱后画柱状图，横轴标最小/最大。</summary>
     private void Draw(Canvas canvas, IReadOnlyList<double> values, string unit)
     {
         canvas.Children.Clear();
@@ -71,8 +96,10 @@ public partial class MatchReportWindow : Window
         var peak = counts.Max();
         if (peak == 0) return;
 
-        // 留出底部 22 px 放刻度
-        var plotHeight = height - 22;
+        // 底部 22 px 放刻度，顶部 12 px 放"峰值"——这样最高的柱子也不会压住标签。
+        const double bottom = 22;
+        const double top = 12;
+        var plotHeight = height - bottom - top;
         var barWidth = width / bins - 1.5;
 
         for (var b = 0; b < bins; b++)
@@ -87,20 +114,21 @@ public partial class MatchReportWindow : Window
                 ToolTip = $"{min + span * b / bins:0.####} – {min + span * (b + 1) / bins:0.####} {unit}：{counts[b]} 个",
             };
             Canvas.SetLeft(rect, b * (barWidth + 1.5));
-            Canvas.SetTop(rect, plotHeight - h);
+            Canvas.SetTop(rect, top + plotHeight - h);
             canvas.Children.Add(rect);
         }
 
+        var axisY = top + plotHeight + 1;
         var axis = new System.Windows.Shapes.Line
         {
-            X1 = 0, X2 = width, Y1 = plotHeight + 1, Y2 = plotHeight + 1,
+            X1 = 0, X2 = width, Y1 = axisY, Y2 = axisY,
             Stroke = AxisBrush, StrokeThickness = 1,
         };
         canvas.Children.Add(axis);
 
-        AddLabel(canvas, min.ToString("0.###", CultureInfo.InvariantCulture), 0, plotHeight + 4);
-        AddLabel(canvas, max.ToString("0.###", CultureInfo.InvariantCulture), width - 48, plotHeight + 4);
-        AddLabel(canvas, $"峰值 {peak} 个", 6, 2);
+        AddLabel(canvas, min.ToString("0.###", CultureInfo.InvariantCulture), 0, axisY + 3);
+        AddLabel(canvas, max.ToString("0.###", CultureInfo.InvariantCulture), width - 48, axisY + 3);
+        AddLabel(canvas, $"峰值 {peak} 个", 6, 0);
     }
 
     private static void AddLabel(Canvas canvas, string text, double left, double top)

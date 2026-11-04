@@ -83,6 +83,15 @@ internal static class Program
             Source = new Uri("pack://application:,,,/Photogrammetry.App;component/Themes/Theme.xaml", UriKind.Absolute)
         });
 
+        // 点云页签单独出图：不靠主窗，直接拿合成地形灌进报告窗口。
+        // 用来验投影、深度雾、包围盒与轴标——这几样错了截图一眼能看出来。
+        if (args.Any(a => string.Equals(a, "--cloud-demo", StringComparison.OrdinalIgnoreCase)))
+        {
+            CloudDemo(Get(args, "--out") ?? "cloud.png",
+                      args.Any(a => string.Equals(a, "--hist", StringComparison.OrdinalIgnoreCase)));
+            return;
+        }
+
         var win = new MainWindow
         {
             WindowState = WindowState.Normal,
@@ -416,6 +425,80 @@ internal static class Program
             if (child is DependencyObject d && FindButton(d, content) is { } found) return found;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 报告窗口「点云」页签的离屏出图。合成一片起伏地形灌进
+    /// <see cref="MatchReportWindow"/>，走真实构造路径——验投影、深度雾、包围盒、轴标。
+    /// <paramref name="histogram"/> 为真时切回直方图页签，用来确认两页没互相踩。
+    /// </summary>
+    private static void CloudDemo(string outPath, bool histogram)
+    {
+        var random = new Random(12345);
+        const int count = 4000;
+        var points = new List<AutoIntersectPoint>(count);
+
+        for (var k = 0; k < count; k++)
+        {
+            var x = (random.NextDouble() - 0.5) * 800.0;
+            var y = (random.NextDouble() - 0.5) * 640.0;
+            var z = 26.0 * Math.Sin(x / 130.0) * Math.Cos(y / 95.0)
+                    + 14.0 * Math.Sin(y / 42.0)
+                    + (random.NextDouble() - 0.5) * 1.2;
+
+            var ground = new IntersectionResult
+            {
+                Success = true,
+                Point = new GroundPointM(x, y, z),
+                ConvergenceAngleDeg = 30.0 + 20.0 * random.NextDouble(),
+            };
+
+            points.Add(new AutoIntersectPoint(
+                k, x, y, x, y,
+                new ImagePointMm(x, y), new ImagePointMm(x, y),
+                ground, random.NextDouble(), random.NextDouble() * 0.05));
+        }
+
+        var run = new AutoIntersectBatchRun { Points = points, Matched = count };
+
+        var report = new MatchReportWindow(run)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = 0,
+            Top = 0,
+            ShowInTaskbar = false,
+        };
+
+        report.Show();
+        Pump(report);
+
+        if (report.FindName("ReportTabs") is TabControl tabs)
+        {
+            tabs.SelectedIndex = histogram ? 0 : 1;
+            Pump(report);
+        }
+
+        var root = (FrameworkElement)report.Content;
+        var width = (int)Math.Round(root.ActualWidth);
+        var height = (int)Math.Round(root.ActualHeight);
+        var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(root);
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(rtb));
+        using (var stream = File.Create(outPath))
+        {
+            encoder.Save(stream);
+        }
+
+        Console.WriteLine($"saved {outPath}（{width}x{height}，{count} 点）");
+        if (report.FindName("CloudInfo") is TextBlock info)
+        {
+            var at = info.TranslatePoint(new Point(0, 0), root);
+            Console.WriteLine($"  info: h={info.ActualHeight:0.#} y={at.Y:0.#} text=\"{info.Text}\"");
+        }
+
+        report.Close();
     }
 
     private static void Pump(Window win)    {
