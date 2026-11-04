@@ -490,6 +490,49 @@ PGM_API int32_t pgm_epipolar_row(const pgm_epipolar_input* in, int32_t side,
 PGM_API int32_t pgm_epipolar_lines_at(const pgm_epipolar_input* in, double theta_rad,
                                       pgm_line2* out_left, pgm_line2* out_right);
 
+/*
+ * 核线重采样：把两幅影像各自沿核线方向重新采样成两幅「核线影像」。
+ *
+ * 第 j 行绑到第 j 个核面：theta_j = pi * (j + 0.5) / rows。同一行里第 k 个采样点取
+ *      t = (k - (cols-1)/2) * step_mm
+ *      p = 核线的最近点 + t * 方向
+ * 左右两幅用**同一个** step / cols，所以同名点的行号一定相等，列号差就是视差。
+ *
+ * 采样用双线性。采样点落在像幅外时该像素写 0，并把 mask 置 0（mask 可为 NULL）。
+ * 输出缓冲由调用方预分配：rows x cols 的 8 位灰度，step 是每行字节数。
+ * 这是逐像素的活，**一次调用做完两幅**，不要按行/按像素回调。
+ */
+typedef struct pgm_epipolar_rectify_input
+{
+    pgm_epipolar_input epipolar;
+
+    int32_t rows;        /* 核线影像行数，一行 = 一个核面 */
+    int32_t cols;        /* 每行采样点数，左右两幅必须相同 */
+    double  step_mm;     /* 沿核线的采样间隔，一般取像元尺寸 */
+
+    const uint8_t* left_pixels;
+    int32_t        left_width, left_height, left_step;
+    const uint8_t* right_pixels;
+    int32_t        right_width, right_height, right_step;
+
+    double pixel_size_mm;                 /* 像元 -> mm */
+    double cx_left_px,  cy_left_px;       /* 主点（像元，列/行） */
+    double cx_right_px, cy_right_px;
+} pgm_epipolar_rectify_input;
+
+typedef struct pgm_epipolar_rectify_output
+{
+    uint8_t* left_image;   int32_t left_step;    /* rows x cols */
+    uint8_t* right_image;  int32_t right_step;
+    uint8_t* left_mask;                          /* rows x cols，可为 NULL */
+    uint8_t* right_mask;
+    pgm_line2* left_lines;                       /* rows 条，可为 NULL */
+    pgm_line2* right_lines;
+} pgm_epipolar_rectify_output;
+
+PGM_API int32_t pgm_epipolar_rectify(const pgm_epipolar_rectify_input*  in,
+                                     const pgm_epipolar_rectify_output* out);
+
 /* 库版本字符串，形如 "1.0.0"。 */
 PGM_API const char* pgm_version(void);
 

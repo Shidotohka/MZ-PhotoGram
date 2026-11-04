@@ -42,7 +42,7 @@ native/
     ├── test_resection.cpp              后方交会自检：约定对表、雅可比、往返、噪声、退化
     ├── test_forward_intersection.cpp   前方交会自检：往返、与教材对表、旁向反证、精度
     ├── test_relative_orientation.cpp   相对定向自检：七段（含旁向 30%、纯旁向、粗差）
-    └── test_epipolar.cpp               核线自检：六段（核线穿过同名点、过核点、退化）
+    └── test_epipolar.cpp               核线自检：八段（穿过同名点、过核点、重采样、退化）
 ```
 
 $R$ 的约定只写一份，放在 `src/geometry.hpp`，各算法都 include 它。这份约定写歪了程序照样出数——上次外方位解错就栽在这类「两份约定」上。
@@ -237,7 +237,9 @@ $$\mathbf n=\mathbf b\times\mathbf d_1,\qquad \mathbf m=R\,\mathbf n,\qquad m_u 
 
 **这一层不依赖任何第三方库**，理由见[界面设计规范 ADR-22](../Docs/界面设计规范.md)：核线只有几行乘加，交给 OpenCV 反而多一层黑盒；OpenCV 只用在 M10 的特征匹配里。
 
-自检：`pgm_epipolar_test`，六段，合成像对 200 点，左/右偏离 $10^{-14}$ mm 量级。
+自检：`pgm_epipolar_test`，八段，合成像对 200 点，左/右偏离 $10^{-14}$ mm 量级。
+
+**核线重采样**（`pgm_epipolar_rectify`）：把两幅影像各自沿核线重采样成两幅核线影像，**一次调用做完两幅**。第 $j$ 行绑到第 $j$ 个核面（$\theta_j=\pi(j+\tfrac12)/\text{rows}$），同一行第 $k$ 个采样点取 $t=(k-\frac{\text{cols}-1}{2})\cdot\text{step}$，沿核线方向双线性取值；越界写 0 并置掩膜位。左右两幅共用同一组 `step`/`cols`，所以同名点的行号必然相等，列号差就是视差。自检第 7 段用解析纹理验证采样位置：2732 个采样点与解析值最大差 1 个灰度级。
 
 ---
 
@@ -301,7 +303,7 @@ SIFT 能配出 106 对、RANSAC 也认，但相对定向不收敛（`PGM_ERR_NOT
 | 算法本身（后方交会） | `native\build\bin\Release\pgm_resection_test.exe` | 同上，六段检查 |
 | 算法本身（前方交会） | `native\build\bin\Release\pgm_intersection_test.exe` | 同上，七段检查 |
 | 算法本身（相对定向） | `native\build\bin\Release\pgm_relative_orientation_test.exe` | 同上，七段检查 |
-| 算法本身（核线几何） | `native\build\bin\Release\pgm_epipolar_test.exe` | 同上，六段检查 |
+| 算法本身（核线几何） | `native\build\bin\Release\pgm_epipolar_test.exe` | 同上，八段检查（含核线重采样） |
 | 匹配（第二个 DLL，需 OpenCV） | `native\build\bin\Release\pgm_cv_match_test.exe` | SIFT → 核线 → RANSAC 全链路，真实像对约 40 s |
 | 托管调用 | `dotnet run --project src/Snap/Snap.csproj -c Debug -- --fiducial --dir Data/sim` | 封送对不对、DLL 找得到 |
 | 界面 | `Data/sim/README.md` 第 3 节 | 手动点 8 个框标能不能复现 |

@@ -17,6 +17,7 @@
 #include "geometry.hpp"
 #include "internal.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -24,6 +25,7 @@ namespace {
 using pgm::Mat3;
 
 constexpr double kTiny = 1e-12;
+constexpr double kPi   = 3.14159265358979323846;
 
 void cross3(const double a[3], const double b[3], double out[3])
 {
@@ -72,10 +74,36 @@ void ortho_basis(const double b[3], double u1[3], double u2[3])
 // 把核面转角折到 [0, pi)：n 与 -n 是同一个平面，转角必须唯一。
 double fold_theta(double t)
 {
-    constexpr double kPi = 3.14159265358979323846;
     while (t < 0.0) t += kPi;
     while (t >= kPi) t -= kPi;
     return t;
+}
+
+// 双线性采样：i 是列、j 是行，可以是小数。落在像幅外返回 false（不钳边，钳边会造出假纹理）。
+bool sample_bilinear(const uint8_t* px, int32_t w, int32_t h, int32_t step,
+                     double i, double j, uint8_t* out)
+{
+    if (!(i >= 0.0) || !(j >= 0.0) ||
+        i > static_cast<double>(w - 1) || j > static_cast<double>(h - 1)) {
+        return false;
+    }
+
+    const int32_t i0 = static_cast<int32_t>(std::floor(i));
+    const int32_t j0 = static_cast<int32_t>(std::floor(j));
+    const int32_t i1 = std::min(i0 + 1, w - 1);
+    const int32_t j1 = std::min(j0 + 1, h - 1);
+    const double fx = i - static_cast<double>(i0);
+    const double fy = j - static_cast<double>(j0);
+
+    auto at = [px, step](int32_t ii, int32_t jj) {
+        return static_cast<double>(px[static_cast<size_t>(jj) * static_cast<size_t>(step) +
+                                      static_cast<size_t>(ii)]);
+    };
+
+    const double top = at(i0, j0) * (1.0 - fx) + at(i1, j0) * fx;
+    const double bot = at(i0, j1) * (1.0 - fx) + at(i1, j1) * fx;
+    *out = static_cast<uint8_t>(std::lround(top * (1.0 - fy) + bot * fy));
+    return true;
 }
 
 double theta_of_normal(const double n[3], const double b[3])
@@ -344,6 +372,113 @@ int32_t pgm_epipolar_lines_at(const pgm_epipolar_input* in, double theta_rad,
 
     if (out_left) *out_left = left;
     if (out_right) *out_right = right;
+    return PGM_OK;
+}
+
+int32_t pgm_epipolar_rectify(const pgm_epipolar_rectify_input*  in,
+                             const pgm_epipolar_rectify_output* out)
+{
+    if (in == nullptr || out == nullptr) {
+        pgm::set_error("输入或输出指针为空");
+        return PGM_ERR_NULL_ARGUMENT;
+    }
+    if (out->left_image == nullptr || out->right_image == nullptr) {
+        pgm::set_error("核线影像的输出缓冲为空");
+        return PGM_ERR_NULL_ARGUMENT;
+    }
+    if (in->rows <= 0 || in->cols <= 0 || !(in->step_mm > 0.0) || !(in->pixel_size_mm > 0.0) ||
+        !std::isfinite(in->step_mm) || !std::isfinite(in->pixel_size_mm)) {
+        pgm::set_error("行数/列数/采样间隔/像元尺寸必须为正");
+        return PGM_ERR_INVALID_ARGUMENT;
+    }
+    if (in->left_pixels == nullptr || in->right_pixels == nullptr ||
+        in->left_width <= 0 || in->left_height <= 0 || in->left_step < in->left_width ||
+        in->right_width <= 0 || in->right_height <= 0 || in->right_step < in->right_width) {
+        pgm::set_error("源影像缓冲为空或尺寸不合法");
+        return PGM_ERR_INVALID_ARGUMENT;
+    }
+
+    Context ctx;
+    const int32_t rc = prepare(&in->epipolar, &ctx);
+    if (rc != PGM_OK) return rc;
+
+    double u1[3], u2[3];
+    ortho_basis(ctx.b, u1, u2);
+
+    // 直线 a x + b y + c = 0 的垂足与方向向量（(a,b) 已归一化，垂足就是 -c*(a,b)）。
+    auto foot_and_dir = [](const pgm_line2& l, double* fx, double* fy, double* dx, double* dy) {
+        *fx = -l.c * l.a;
+        *fy = -l.c * l.b;
+        *dx = -l.b;
+        *dy = l.a;
+    };
+
+    for (int32_t row = 0; row < in->rows; ++row) {
+        const double theta = kPi * (static_cast<double>(row) + 0.5) / static_cast<double>(in->rows);
+        const double c = std::cos(theta);
+        const double s = std::sin(theta);
+
+        double n[3];
+        for (int i = 0; i < 3; ++i) n[i] = c * u1[i] + s * u2[i];
+
+        double m[3];
+        pgm::mat_vec(ctx.r, n, m);
+
+        pgm_line2 left_line{}, right_line{};
+        if (!line_of_plane(n, ctx.f, &left_line) || !line_of_plane(m, ctx.f, &right_line)) {
+            pgm::set_error("核面与像平面平行：这一行没有核线");
+            return PGM_ERR_DEGENERATE;
+        }
+
+        double lfx, lfy, ldx, ldy, rfx, rfy, rdx, rdy;
+        foot_and_dir(left_line, &lfx, &lfy, &ldx, &ldy);
+        foot_and_dir(right_line, &rfx, &rfy, &rdx, &rdy);
+
+        // 两幅图的列方向必须同向，否则右图整片左右镜像、视差符号反过来。
+        if (ldx * rdx + ldy * rdy < 0.0) {
+            rdx = -rdx;
+            rdy = -rdy;
+        }
+
+        if (out->left_lines) out->left_lines[row] = left_line;
+        if (out->right_lines) out->right_lines[row] = right_line;
+
+        uint8_t* lrow = out->left_image + static_cast<size_t>(row) * static_cast<size_t>(out->left_step);
+        uint8_t* rrow = out->right_image + static_cast<size_t>(row) * static_cast<size_t>(out->right_step);
+        uint8_t* lmask = out->left_mask
+            ? out->left_mask + static_cast<size_t>(row) * static_cast<size_t>(in->cols) : nullptr;
+        uint8_t* rmask = out->right_mask
+            ? out->right_mask + static_cast<size_t>(row) * static_cast<size_t>(in->cols) : nullptr;
+
+        const double half = 0.5 * (static_cast<double>(in->cols) - 1.0);
+
+        for (int32_t k = 0; k < in->cols; ++k) {
+            const double t = (static_cast<double>(k) - half) * in->step_mm;
+
+            const double lx_mm = lfx + t * ldx;
+            const double ly_mm = lfy + t * ldy;
+            const double li_px = in->cx_left_px + lx_mm / in->pixel_size_mm;
+            const double lj_px = in->cy_left_px - ly_mm / in->pixel_size_mm;
+
+            uint8_t lv = 0;
+            const bool lok = sample_bilinear(in->left_pixels, in->left_width, in->left_height,
+                                             in->left_step, li_px, lj_px, &lv);
+            lrow[k] = lok ? lv : 0;
+            if (lmask) lmask[k] = lok ? 1 : 0;
+
+            const double rx_mm = rfx + t * rdx;
+            const double ry_mm = rfy + t * rdy;
+            const double ri_px = in->cx_right_px + rx_mm / in->pixel_size_mm;
+            const double rj_px = in->cy_right_px - ry_mm / in->pixel_size_mm;
+
+            uint8_t rv = 0;
+            const bool rok = sample_bilinear(in->right_pixels, in->right_width, in->right_height,
+                                             in->right_step, ri_px, rj_px, &rv);
+            rrow[k] = rok ? rv : 0;
+            if (rmask) rmask[k] = rok ? 1 : 0;
+        }
+    }
+
     return PGM_OK;
 }
 

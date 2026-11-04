@@ -340,6 +340,134 @@ int main()
                "核面转角含 NaN 被拒");
     }
 
+    // ---------------------------------------------------------------- 7
+    std::printf("== 7 核线重采样：沿核线采样是否取到正确位置 ==\n");
+    {
+        const int W = 512, H = 512;
+        const double pix = 0.5;
+        const double cx = 0.5 * (W - 1), cy = 0.5 * (H - 1);
+
+        // 解析纹理：值只由像平面 mm 坐标决定，所以重采样后每个采样点都能对出真值。
+        auto texture = [](double x, double y) {
+            return 100.0 + 70.0 * std::sin(x / 9.0) * std::cos(y / 13.0)
+                         + 40.0 * std::sin((x + y) / 21.0);
+        };
+        auto make_image = [&](std::vector<uint8_t>& img) {
+            img.assign(static_cast<size_t>(W) * static_cast<size_t>(H), 0);
+            for (int j = 0; j < H; ++j) {
+                for (int i = 0; i < W; ++i) {
+                    const double x = (static_cast<double>(i) - cx) * pix;
+                    const double y = (cy - static_cast<double>(j)) * pix;
+                    double v = texture(x, y);
+                    v = std::max(0.0, std::min(255.0, v));
+                    img[static_cast<size_t>(j) * static_cast<size_t>(W) + static_cast<size_t>(i)] =
+                        static_cast<uint8_t>(std::lround(v));
+                }
+            }
+        };
+
+        std::vector<uint8_t> limg, rimg;
+        make_image(limg);
+        make_image(rimg);
+
+        const int32_t rows = 64, cols = 96;
+        const double step = 2.0;
+        std::vector<uint8_t> lout(static_cast<size_t>(rows) * cols), rout(static_cast<size_t>(rows) * cols);
+        std::vector<uint8_t> lmask(static_cast<size_t>(rows) * cols), rmask(static_cast<size_t>(rows) * cols);
+        std::vector<pgm_line2> llines(static_cast<size_t>(rows)), rlines(static_cast<size_t>(rows));
+
+        pgm_epipolar_rectify_input ri{};
+        ri.epipolar = sc.epi;
+        ri.rows = rows;
+        ri.cols = cols;
+        ri.step_mm = step;
+        ri.left_pixels = limg.data();
+        ri.left_width = W;
+        ri.left_height = H;
+        ri.left_step = W;
+        ri.right_pixels = rimg.data();
+        ri.right_width = W;
+        ri.right_height = H;
+        ri.right_step = W;
+        ri.pixel_size_mm = pix;
+        ri.cx_left_px = cx;
+        ri.cy_left_px = cy;
+        ri.cx_right_px = cx;
+        ri.cy_right_px = cy;
+
+        pgm_epipolar_rectify_output ro{};
+        ro.left_image = lout.data();
+        ro.left_step = cols;
+        ro.right_image = rout.data();
+        ro.right_step = cols;
+        ro.left_mask = lmask.data();
+        ro.right_mask = rmask.data();
+        ro.left_lines = llines.data();
+        ro.right_lines = rlines.data();
+
+        const int32_t rc = pgm_epipolar_rectify(&ri, &ro);
+
+        double worst = 0.0;
+        int checked = 0;
+        int masked = 0;
+        if (rc == PGM_OK) {
+            const double half = 0.5 * (static_cast<double>(cols) - 1.0);
+            for (int32_t row = 0; row < rows; ++row) {
+                const pgm_line2& line = llines[static_cast<size_t>(row)];
+                const double fx = -line.c * line.a;
+                const double fy = -line.c * line.b;
+                const double dx = -line.b;
+                const double dy = line.a;
+                for (int32_t k = 0; k < cols; ++k) {
+                    if (lmask[static_cast<size_t>(row) * cols + k] == 0) { ++masked; continue; }
+                    const double t = (static_cast<double>(k) - half) * step;
+                    const double x = fx + t * dx;
+                    const double y = fy + t * dy;
+                    double want = texture(x, y);
+                    want = std::max(0.0, std::min(255.0, want));
+                    const double got = static_cast<double>(lout[static_cast<size_t>(row) * cols + k]);
+                    const double err = std::fabs(got - want);
+                    if (err > worst) worst = err;
+                    ++checked;
+                }
+            }
+        }
+
+        char detail[200];
+        std::snprintf(detail, sizeof detail, "%d 个采样点对出解析值，最大差 %.1f 灰度级（越界 %d 个）",
+                      checked, worst, masked);
+        say(rc == PGM_OK && checked > 1000 && worst <= 4.0, "沿核线采样取到正确位置", detail);
+    }
+
+    // ---------------------------------------------------------------- 8
+    std::printf("== 8 重采样的退化与输入错误 ==\n");
+    {
+        std::vector<uint8_t> img(64 * 64, 128), out(64 * 64, 0);
+        pgm_epipolar_rectify_input ri{};
+        ri.epipolar = sc.epi;
+        ri.rows = 8; ri.cols = 8; ri.step_mm = 1.0;
+        ri.left_pixels = img.data(); ri.left_width = 64; ri.left_height = 64; ri.left_step = 64;
+        ri.right_pixels = img.data(); ri.right_width = 64; ri.right_height = 64; ri.right_step = 64;
+        ri.pixel_size_mm = 0.5;
+        ri.cx_left_px = 31.5; ri.cy_left_px = 31.5; ri.cx_right_px = 31.5; ri.cy_right_px = 31.5;
+
+        pgm_epipolar_rectify_output ro{};
+        ro.left_image = out.data(); ro.left_step = 8;
+        ro.right_image = out.data(); ro.right_step = 8;
+
+        pgm_epipolar_rectify_input bad = ri;
+        bad.rows = 0;
+        say_rc(pgm_epipolar_rectify(&bad, &ro), PGM_ERR_INVALID_ARGUMENT, "行数为 0 被拒");
+
+        bad = ri;
+        bad.step_mm = 0.0;
+        say_rc(pgm_epipolar_rectify(&bad, &ro), PGM_ERR_INVALID_ARGUMENT, "采样间隔为 0 被拒");
+
+        pgm_epipolar_rectify_output bad_out = ro;
+        bad_out.left_image = nullptr;
+        say_rc(pgm_epipolar_rectify(&ri, &bad_out), PGM_ERR_NULL_ARGUMENT, "输出缓冲为空被拒");
+    }
+
     std::printf("\n");
     if (g_failures == 0) {
         std::printf("EPOLAR PASS\n");
