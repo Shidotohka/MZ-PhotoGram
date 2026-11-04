@@ -282,9 +282,26 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>最近一次自动匹配的结果，供「匹配质量图」窗口使用。</summary>
+    private AutoIntersectBatchRun? _lastMatchRun;
+
+    /// <summary>质量图单开一个窗口：主窗五区已经占满，图表塞进来会把表挤没。</summary>
+    private void OpenMatchReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lastMatchRun is not { Success: true })
+        {
+            DiagSummary.Text = "还没有匹配结果：先按「自动匹配（全部影像）」。";
+            DiagSummary.Foreground = WarnBadge;
+            return;
+        }
+
+        new MatchReportWindow(_lastMatchRun) { Owner = this }.Show();
+    }
+
     /// <summary>把一次「全工作区自动交会」摆到结果页上：左边概要、右边逐点。</summary>
     private void ShowAutoIntersect(AutoIntersectBatchRun run, int preparedCount)
     {
+        _lastMatchRun = run.Success ? run : null;
         const string title = "前方交会 · 全部影像";
 
         // 跳过的影像与像对级提醒都进日志：一句一条，不铺在结果页上。
