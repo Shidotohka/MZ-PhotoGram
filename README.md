@@ -30,7 +30,7 @@ dotnet build src/App/App.csproj -c Debug
 dotnet run --project src/App/App.csproj
 ```
 
-需要 .NET SDK 10、MSVC（VS2022）与 CMake。托管侧不依赖任何 NuGet 包，可离线还原。
+需要 .NET SDK 10、MSVC（VS2022）与 CMake。
 
 ---
 
