@@ -25,6 +25,7 @@ add_library(photogrammetry SHARED
     src/resection.cpp
     src/forward_intersection.cpp
     src/relative_orientation.cpp
+    src/epipolar.cpp
 )
 
 target_include_directories(photogrammetry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -44,9 +45,13 @@ target_link_libraries(pgm_intersection_test PRIVATE photogrammetry)
 add_executable(pgm_relative_orientation_test tests/test_relative_orientation.cpp)
 target_link_libraries(pgm_relative_orientation_test PRIVATE photogrammetry)
 
+add_executable(pgm_epipolar_test tests/test_epipolar.cpp)
+target_link_libraries(pgm_epipolar_test PRIVATE photogrammetry)
+
 enable_testing()
 add_test(NAME interior_orientation
          COMMAND pgm_test ${CMAKE_CURRENT_SOURCE_DIR}/../Data/sim)
 add_test(NAME resection COMMAND pgm_resection_test)
 add_test(NAME forward_intersection COMMAND pgm_intersection_test)
 add_test(NAME relative_orientation COMMAND pgm_relative_orientation_test)
+add_test(NAME epipolar COMMAND pgm_epipolar_test)

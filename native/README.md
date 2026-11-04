@@ -35,12 +35,14 @@ native/
 │   ├── interior_orientation.cpp   内定向：六参数仿射最小二乘
 │   ├── resection.cpp              空间后方交会：共线方程 + 迭代最小二乘
 │   ├── forward_intersection.cpp   空间前方交会：三式最小二乘解投影系数
-│   └── relative_orientation.cpp   相对定向：共面条件迭代 + 规准 + 留一法粗差剔除
+│   ├── relative_orientation.cpp   相对定向：共面条件迭代 + 规准 + 留一法粗差剔除
+│   └── epipolar.cpp               核线几何：核线、核点、核面转角、点到核线距离
 └── tests/
     ├── test_interior_orientation.cpp   读 Data/sim 的合成数据做验收
     ├── test_resection.cpp              后方交会自检：约定对表、雅可比、往返、噪声、退化
     ├── test_forward_intersection.cpp   前方交会自检：往返、与教材对表、旁向反证、精度
-    └── test_relative_orientation.cpp   相对定向自检：七段（含旁向 30%、纯旁向、粗差）
+    ├── test_relative_orientation.cpp   相对定向自检：七段（含旁向 30%、纯旁向、粗差）
+    └── test_epipolar.cpp               核线自检：六段（核线穿过同名点、过核点、退化）
 ```
 
 $R$ 的约定只写一份，放在 `src/geometry.hpp`，各算法都 include 它。这份约定写歪了程序照样出数——上次外方位解错就栽在这类「两份约定」上。
@@ -64,6 +66,7 @@ native/build/bin/Release/pgm_test.exe
 native/build/bin/Release/pgm_resection_test.exe
 native/build/bin/Release/pgm_intersection_test.exe
 native/build/bin/Release/pgm_relative_orientation_test.exe
+native/build/bin/Release/pgm_epipolar_test.exe
 ```
 
 `src/Directory.Build.props` 会把 DLL 复制到托管项目的输出目录。
@@ -203,6 +206,41 @@ $$\begin{vmatrix}b_x&b_y&b_z\\u_1&v_1&w_1\\u_2&v_2&w_2\end{vmatrix}=0,\qquad
 
 ---
 
+## 现有接口：核线几何
+
+```c
+int32_t pgm_epipolar_rotation(double phi, double omega, double kappa, double* r9);
+
+int32_t pgm_epipolar_lines(const pgm_epipolar_input* in, double x1, double y1,
+                           pgm_line2* left, pgm_line2* right);
+int32_t pgm_epipolar_epipoles(const pgm_epipolar_input* in, double* e1x, double* e1y, int32_t* e1_inf,
+                                                          double* e2x, double* e2y, int32_t* e2_inf);
+int32_t pgm_epipolar_distance(const pgm_epipolar_input* in, double x1, double y1,
+                                                          double x2, double y2, double* dist);
+int32_t pgm_epipolar_row(const pgm_epipolar_input* in, int32_t side, double x, double y, double* theta);
+int32_t pgm_epipolar_lines_at(const pgm_epipolar_input* in, double theta, pgm_line2* left, pgm_line2* right);
+```
+
+输入就是相对定向的结果 $(\mathbf b,R)$ 加主距；输出是像平面上的直线 $ax+by+c=0$（系数已归一化，点到线距离直接就是 $|ax+by+c|$）、两个核点、有符号距离，以及核面转角 $\theta\in[0,\pi)$。
+
+模型（共面条件换个未知数解）：
+
+$$\mathbf n=\mathbf b\times\mathbf d_1,\qquad \mathbf m=R\,\mathbf n,\qquad m_u x_2+m_v y_2=f\,m_w$$
+
+实现要点：
+
+1. **同一平面切两片**。$\mathbf n$ 是左核线、$\mathbf m=R\mathbf n$ 是右核线，两者必过同一个核点。这是「同名点必须同行」的全部几何，没有近似。
+2. **$\theta$ 是行号**。$\theta$ 把「过基线的核面」参数化：$\mathbf n_\theta=\cos\theta\,\mathbf u_1+\sin\theta\,\mathbf u_2$（$\mathbf u_{1,2}\perp\mathbf b$）。同名点必然给出同一个 $\theta$（左右两片各算一次，实测差 $4\times10^{-16}$ rad），核线重采样就把第 $j$ 行绑到第 $j$ 个 $\theta$ 上。
+3. **$\mathbf b$ 只取方向**，长度随便传；`prepare` 里先归一化，所以相对定向的 $|\mathbf b|=1$ 与界面上的米制基线都对。
+4. **右核点用 $R\mathbf b$，不是 $R^\top\mathbf b$**。两份文档里的 $R$ 方向相反（[核线算法.md](../Docs/核线算法.md) 用的是「像 → 辅助系」，本库出口是「辅助系 → 像」），照抄公式会得到一个差 200 mm 的"核点"——自检第 3 段抓的就是这个。
+5. **退化就明说**：主距非正、零基线、非有限值 → `PGM_ERR_INVALID_ARGUMENT`；$\mathbf n\to0$（前方运动、像点落在主点上）或核线与像平面平行 → `PGM_ERR_DEGENERATE`。核点在无穷远不算错误，用 `at_infinity` 标志报出来。
+
+**这一层不依赖任何第三方库**，理由见[界面设计规范 ADR-22](../Docs/界面设计规范.md)：核线只有几行乘加，交给 OpenCV 反而多一层黑盒；OpenCV 只用在 M10 的特征匹配里。
+
+自检：`pgm_epipolar_test`，六段，合成像对 200 点，左/右偏离 $10^{-14}$ mm 量级。
+
+---
+
 ## 验证
 
 三层，从下到上：
@@ -213,6 +251,7 @@ $$\begin{vmatrix}b_x&b_y&b_z\\u_1&v_1&w_1\\u_2&v_2&w_2\end{vmatrix}=0,\qquad
 | 算法本身（后方交会） | `native\build\bin\Release\pgm_resection_test.exe` | 同上，六段检查 |
 | 算法本身（前方交会） | `native\build\bin\Release\pgm_intersection_test.exe` | 同上，七段检查 |
 | 算法本身（相对定向） | `native\build\bin\Release\pgm_relative_orientation_test.exe` | 同上，七段检查 |
+| 算法本身（核线几何） | `native\build\bin\Release\pgm_epipolar_test.exe` | 同上，六段检查 |
 | 托管调用 | `dotnet run --project src/Snap/Snap.csproj -c Debug -- --fiducial --dir Data/sim` | 封送对不对、DLL 找得到 |
 | 界面 | `Data/sim/README.md` 第 3 节 | 手动点 8 个框标能不能复现 |
 

@@ -398,6 +398,98 @@ PGM_API int32_t pgm_resection_design(int32_t       count,
                                      double*       out_a,
                                      double*       out_l);
 
+/* ------------------------------------------------------------ 核线几何 */
+
+/*
+ * 核线几何的输入：相对定向的结果 (b, R) 加主距。
+ *
+ *   bx, by, bz   基线单位方向，表达在辅助系（= 左片像空间系：X 右、Y 上、Z 指向摄影者）。
+ *                就是 pgm_relative_orientation 输出的 b_u,b_v,b_w；只取方向，长度被忽略。
+ *   rotation     辅助系 -> 右片像空间的 3x3，行主序。就是 pgm_relative_orientation 的 rotation。
+ *   focal_length 主距 mm，必须与相对定向时用的同一个值。
+ *
+ * 三个角装成矩阵用 pgm_epipolar_rotation，自检与 M6.5 都走它，免得各处自己拼教材阵。
+ */
+typedef struct pgm_epipolar_input
+{
+    double bx, by, bz;
+    double rotation[9];
+    double focal_length_mm;
+} pgm_epipolar_input;
+
+/* 像平面上的直线 a*x + b*y + c = 0（x/y 为像平面 mm）。系数已按 a^2+b^2 = 1 归一化。 */
+typedef struct pgm_line2
+{
+    double a, b, c;
+} pgm_line2;
+
+/*
+ * 由三个角装出教材形式的旋转阵 R = R_kappa * R_omega * R_phi（行主序 9 个）。
+ * 方向与 pgm_resection / pgm_relative_orientation 的 rotation 一致：辅助系 -> 像空间。
+ */
+PGM_API int32_t pgm_epipolar_rotation(double  phi_rad, double omega_rad, double kappa_rad,
+                                      double* out_rotation9);
+
+/*
+ * 给定左像点，输出它与它对应的**右核线**，另外把左核线也带出来。
+ *
+ *   n = b × (x1, y1, -f)     核面法向量（辅助系）
+ *   左核线：n_u x + n_v y = f n_w
+ *   右核线：m = R n，m_u x2 + m_v y2 = f m_w
+ *
+ * 左右两条是**同名核线**：同一个核面切两张像片切出来的。同名点在右片上的候选只能落在这条线上，
+ * 这就是把匹配从二维压成一维的依据。
+ *
+ * 平面与像平面平行（直线在无穷远）或点与基线重合时返回 PGM_ERR_DEGENERATE。
+ */
+PGM_API int32_t pgm_epipolar_lines(const pgm_epipolar_input* in,
+                                   double x1_mm, double y1_mm,
+                                   pgm_line2* out_left, pgm_line2* out_right);
+
+/*
+ * 两个核点（像平面 mm）。核点 = 基线与像平面的交点。
+ *
+ *   e1 = (-f b_x / b_z, -f b_y / b_z)
+ *   e2 = (-f v_u / v_w, -f v_v / v_w)，v = R b
+ *
+ * 注意 e2 用的是 R b 而不是 R^T b：[核线算法.md] 里写 R^T 是因为那份推导的 R 是
+ * 「像 -> 辅助系」，与本库出口的 rotation（辅助系 -> 像）互为转置。
+ *
+ * 近垂直摄影时 b_z、v_w 都接近 0，核点跑到无穷远：这时 *out_at_infinity 置 1，
+ * 坐标写 0，调用方应当按「核线近似平行」处理，不要拿这个 0 当真。
+ */
+PGM_API int32_t pgm_epipolar_epipoles(const pgm_epipolar_input* in,
+                                      double*   out_e1_x, double* out_e1_y, int32_t* out_e1_at_infinity,
+                                      double*   out_e2_x, double* out_e2_y, int32_t* out_e2_at_infinity);
+
+/*
+ * 右像点到「左像点所定核线」的**有符号**垂直距离（mm）：正值在法向一侧。
+ * 超过约 0.1 mm 基本可以判为错配——这是匹配后最便宜的一道粗差闸门。
+ * 与 pgm_epipolar_lines 同样的退化情况返回 PGM_ERR_DEGENERATE。
+ */
+PGM_API int32_t pgm_epipolar_distance(const pgm_epipolar_input* in,
+                                      double x1_mm, double y1_mm,
+                                      double x2_mm, double y2_mm,
+                                      double* out_distance_mm);
+
+/*
+ * 核面转角 theta ∈ [0, pi)：把「过基线、过这个像点的那个核面」参数化。
+ *
+ * side = 0 用左像点（辅助系里直接算），side = 1 用右像点（先乘 R^T 转回辅助系）。
+ * 同名点必须落在同一个核面上，所以两边算出来的 theta 必须相等——核线重采样就是把
+ * 第 j 行绑到第 j 个 theta 上，这一条相等就是「同名点同行」的来源。
+ */
+PGM_API int32_t pgm_epipolar_row(const pgm_epipolar_input* in, int32_t side,
+                                 double x_mm, double y_mm, double* out_theta_rad);
+
+/*
+ * 反向：给定核面转角 theta，输出该核面在两张像片上切出来的两条核线。
+ * 重采样按「第 j 行 ↔ 第 j 个 theta」走，两幅核线影像的同一行来自同一个核面，
+ * 于是行内任意一对同列射线天然共面。
+ */
+PGM_API int32_t pgm_epipolar_lines_at(const pgm_epipolar_input* in, double theta_rad,
+                                      pgm_line2* out_left, pgm_line2* out_right);
+
 /* 库版本字符串，形如 "1.0.0"。 */
 PGM_API const char* pgm_version(void);
 
