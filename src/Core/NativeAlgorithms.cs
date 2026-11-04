@@ -1130,7 +1130,7 @@ public static class NativeAlgorithms
         (double Cx, double Cy) leftPrincipal,
         (double Cx, double Cy) rightPrincipal,
         (double Bx, double By, double Bz, double[] Rotation, double FocalLengthMm)? epipolar,
-        int capacity = 2000,
+        int capacity = 5000,
         double ratio = 0.8,
         double epipolarToleranceMm = 0.10)
     {

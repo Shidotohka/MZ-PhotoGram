@@ -28,7 +28,9 @@ namespace {
 // Hammer 那两片缩略图：5120 px 的原片缩到 512 px，像元 0.04503 mm x 10
 constexpr double kPixelMm = 0.4503;
 constexpr double kFocalMm = 152.72;
-constexpr int kCapacity = 2000;
+// 上限跟着 cv_match 的默认特征数走：40000 特征在同航线像对上能出四千多个内点，
+// 容量给 2000 会把它截断，测出来的就不是真实数量了。
+constexpr int kCapacity = 8000;
 
 int g_failures = 0;
 
@@ -90,6 +92,7 @@ int main(int argc, char** argv)
     const std::string right_path = argc > 2 ? argv[2]
         : "Data/real/2_Hammer/HammerIndex/01-155_50mic.jpg";
     const double pixel_mm = argc > 3 ? std::atof(argv[3]) : 0.04503;
+    const double ratio = argc > 4 ? std::atof(argv[4]) : 0.8;
 
     std::printf("计算机视觉匹配验收（OpenCV）\n");
     std::printf("版本：%s\n", pgm_cv_version());
@@ -116,7 +119,7 @@ int main(int argc, char** argv)
     base.cy_left_px = 0.5 * (left.rows - 1);
     base.cx_right_px = 0.5 * (right.cols - 1);
     base.cy_right_px = 0.5 * (right.rows - 1);
-    base.ratio = 0.8;
+    base.ratio = ratio;
     base.epipolar_tolerance_mm = 0.10;
     base.use_epipolar = 0;
     base.epipolar.focal_length_mm = kFocalMm;
@@ -246,8 +249,10 @@ int main(int argc, char** argv)
             for (int32_t k = 0; k < constrained.count; ++k) epi.push_back(constrained.epi[k]);
 
             char detail[200];
+            // 输出按描述子距离排序，不是按核线残差排序——"最大"要自己取，不能拿 back()。
+            const double worst = epi.empty() ? 0.0 : *std::max_element(epi.begin(), epi.end());
             std::snprintf(detail, sizeof detail, "%d 对（原 %d 对），|核线距离| 中位数 %.4f mm，最大 %.3f mm",
-                          constrained.count, plain.count, median(epi), epi.empty() ? 0.0 : epi.back());
+                          constrained.count, plain.count, median(epi), worst);
             say(constrained.count >= 20 && median(epi) < 0.05,
                 "核线过滤后仍有足够匹配、残差小", detail);
         } else {

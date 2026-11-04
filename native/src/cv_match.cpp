@@ -22,12 +22,61 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
 namespace {
 
 thread_local std::string g_error;
+
+// 排查用：设 PGM_CV_DEBUG=1 时把每一步剩多少对打到 stderr。
+// 只影响诊断，不改变任何结果——"匹配太少"到底少在哪一步，得看这个漏斗。
+bool funnel_on()
+{
+    static const bool on = std::getenv("PGM_CV_DEBUG") != nullptr;
+    return on;
+}
+
+void funnel(const char* stage, int n)
+{
+    if (funnel_on()) std::fprintf(stderr, "[funnel] %-28s %d\n", stage, n);
+}
+
+// 调参用：PGM_CV_SIFT_MAX 覆盖每片特征数上限（0 = 不限），PGM_CV_MATCHER=bf|flann 强制选匹配器。
+// 只在排查时用；不设就跟原来完全一样。
+//
+// 默认值 40000 是量出来的，不是拍的（Hammer 01-156 x 02-165，5120²，漏斗见 Docs/核线算法.md §八）：
+//   上限      最终同名点     q_rms      说明
+//    8000        154       0.026 mm   旧默认，只剩 1 点 / 3277 px，太抠
+//   20000        377       0.027 mm
+//   40000        776       0.027 mm   取这个：点多 5 倍，精度不变
+//   80000       1379       0.027 mm   再翻倍仍可用，但配对耗时跟着涨
+//  不限        3376         -        SIFT 出 26 万个特征，配对不可接受地慢
+// 特征上限只决定"参与配对的有多少"，不影响检测耗时；耗时主要花在配对。
+int sift_cap()
+{
+    const char* s = std::getenv("PGM_CV_SIFT_MAX");
+    if (s == nullptr) return 40000;
+    return std::atoi(s);
+}
+
+bool force_bf()
+{
+    const char* s = std::getenv("PGM_CV_MATCHER");
+    if (s == nullptr) return false;
+    const std::string v(s);
+    return v == "bf" || v == "BF";
+}
+
+bool force_flann()
+{
+    const char* s = std::getenv("PGM_CV_MATCHER");
+    if (s == nullptr) return false;
+    const std::string v(s);
+    return v == "flann" || v == "FLANN";
+}
 
 void set_error(const char* msg)
 {
@@ -97,22 +146,24 @@ int32_t pgm_cv_match(const pgm_cv_match_input* in,
         cv::Mat desc_left, desc_right;
 
         // SIFT：尺度不变、带方向，对航片的旋转与尺度差异比对 ORB 稳。
-        // 特征数封顶：5120² 的原片能出十万级特征，描述子矩阵乘一遍就是几百亿次浮点，
-        // 匹配上并不需要那么多点——限到 8000/片，覆盖整幅够用了。
-        cv::Ptr<cv::SIFT> sift = cv::SIFT::create(8000);
+        // 特征数封顶只影响"参与配对的点数"，检测本身仍是全图扫一遍（封顶是检测后截断）。
+        // 5120² 原片不封顶能出 26 万特征，配对时间不可接受；40000 是量出来的折中。
+        cv::Ptr<cv::SIFT> sift = cv::SIFT::create(sift_cap());
         sift->detectAndCompute(left, cv::noArray(), kp_left, desc_left);
         sift->detectAndCompute(right, cv::noArray(), kp_right, desc_right);
 
         if (out_detected) {
             *out_detected = static_cast<int32_t>(std::min(kp_left.size(), kp_right.size()));
         }
+        funnel("SIFT 左", static_cast<int>(kp_left.size()));
+        funnel("SIFT 右", static_cast<int>(kp_right.size()));
         if (kp_left.empty() || kp_right.empty() || desc_left.empty() || desc_right.empty()) {
             return PGM_OK;   // 图太平坦：不是调用错误
         }
 
         // 特征少时暴力最近邻最准；上万条时用 FLANN 的 KD 树，否则时间全耗在算距离上。
         cv::Ptr<cv::DescriptorMatcher> matcher;
-        if (desc_left.rows <= 3000) {
+        if (force_bf() || (!force_flann() && desc_left.rows <= 3000)) {
             matcher = cv::makePtr<cv::BFMatcher>(cv::NORM_L2);
         } else {
             matcher = cv::makePtr<cv::FlannBasedMatcher>(
@@ -122,6 +173,7 @@ int32_t pgm_cv_match(const pgm_cv_match_input* in,
 
         std::vector<std::vector<cv::DMatch>> knn;
         matcher->knnMatch(desc_left, desc_right, knn, 2);
+        funnel("最近邻候选", static_cast<int>(knn.size()));
 
         // 反向最近邻：右片每个特征最像左片的哪一个。
         // 只留"互为最佳"的配对——单向比值检验挡不住重复纹理（农田、屋脊），
@@ -135,11 +187,14 @@ int32_t pgm_cv_match(const pgm_cv_match_input* in,
 
         std::vector<Match> kept;
         kept.reserve(knn.size());
+        int n_ratio = 0, n_mutual = 0, n_epi_dropped = 0;
 
         for (const auto& pair : knn) {
             if (pair.size() < 2) continue;
             if (!(pair[0].distance < ratio * pair[1].distance)) continue;   // 比值检验
+            ++n_ratio;
             if (reverse[static_cast<size_t>(pair[0].trainIdx)] != pair[0].queryIdx) continue;  // 互为最佳
+            ++n_mutual;
 
             const cv::KeyPoint& kl = kp_left[static_cast<size_t>(pair[0].queryIdx)];
             const cv::KeyPoint& kr = kp_right[static_cast<size_t>(pair[0].trainIdx)];
@@ -156,13 +211,18 @@ int32_t pgm_cv_match(const pgm_cv_match_input* in,
                 const int32_t rc = pgm_epipolar_distance(&in->epipolar, lx, ly, rx, ry, &d);
                 if (rc == PGM_OK) {
                     m.epi_mm = std::fabs(d);
-                    if (m.epi_mm > tol_mm) continue;    // 几何上不可能，直接丢
+                    if (m.epi_mm > tol_mm) { ++n_epi_dropped; continue; }    // 几何上不可能，直接丢
                 }
                 // rc != OK（核面在无穷远等）时不过滤，留给 RANSAC 与后面的相对定向去判
             }
 
             kept.push_back(m);
         }
+
+        funnel("过比值检验 0.8", n_ratio);
+        funnel("过互为最佳", n_mutual);
+        funnel("核线过滤丢掉", n_epi_dropped);
+        funnel("给 RANSAC 的", static_cast<int>(kept.size()));
 
         // RANSAC：按像元坐标复核。用 3 px 阈值（手工刺点也就这个量级），
         // 只保留能被同一个对极几何解释的配对。
@@ -187,6 +247,7 @@ int32_t pgm_cv_match(const pgm_cv_match_input* in,
                     ++inliers;
                 }
                 if (out_inliers) *out_inliers = inliers;
+                funnel("RANSAC 内点", inliers);
                 kept.swap(filtered);
             }
         }

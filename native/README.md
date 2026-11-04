@@ -258,7 +258,7 @@ int32_t pgm_cv_match(const pgm_cv_match_input* in, int32_t capacity,
 
 一次调用做完五件事，**中间不回调调用方**：
 
-1. SIFT 检特征（每片封顶 8000 条；5120² 原片不封顶会出十万级特征，匹配时间全耗在算距离上）
+1. SIFT 检特征（每片封顶 40000 条，默认值；封顶只决定"参与配对的有多少"，检测本身仍是全图）
 2. 最近邻 + Lowe 比值检验（0.8）
 3. **互为最佳**校验：反向再查一遍，挡住重复纹理
 4. 核线过滤：$|$点到核线距离$|$ > 容差（默认 0.10 mm）直接丢，调的是本库的 `pgm_epipolar_distance`
@@ -282,10 +282,19 @@ native\build\bin\Release\pgm_cv_match_test.exe
 实测（Hammer `01-156` × `01-155`，两片同航线、`5120²`、像元 0.04503 mm、$f=152.72$ mm）：
 
 ```
-检出 8001 特征/片　配上 987 对（RANSAC 内点 987）
-相对定向：4 轮　987/987 参与　q_rms 0.0168 mm　σ0 0.0190 mm　冻结 b_u
-核线过滤后：968 对　|核线距离| 中位数 0.0060 mm，最大 0.021 mm
+检出 40000 特征/片　配上 4694 对（RANSAC 内点 4694）
+相对定向：5 轮　4694/4694 参与　q_rms 0.0225 mm　σ0 0.0280 mm　冻结 b_u
+核线过滤后：4231 对　|核线距离| 中位数 0.0108 mm，最大 0.100 mm（就是容差本身）
 ```
+
+**点数被什么卡住**：设 `PGM_CV_DEBUG=1` 会把逐层漏斗打到 stderr。跨航线那对
+（`01-156` × `02-165`）实测：40000 特征 → 比值检验只剩 1628（砍 96%，重复纹理下
+第一、第二候选一样好）→ 互为最佳 1318 → 核线过滤 746 → RANSAC 746。**瓶颈是比值检验，
+不是核线**；核线砍掉的都是真错配，砍完 RANSAC 一个都不用再丢。逐层数字与两条后续杠杆
+（每片只检一次特征、核线一维匹配）见[核线算法 §八](../Docs/核线算法.md)。
+
+调参用的两个环境变量（不设就跟默认一样）：
+`PGM_CV_SIFT_MAX`（每片特征上限，`0` = 不限）、`PGM_CV_MATCHER`（`bf` / `flann` 强制选匹配器）。
 
 **已知不行的一档**：`PointPos/` 里那两张 512² 缩略图（`01-156` × `02-165`，跨航线）。
 SIFT 能配出 106 对、RANSAC 也认，但相对定向不收敛（`PGM_ERR_NOT_CONVERGED`）——
@@ -304,7 +313,7 @@ SIFT 能配出 106 对、RANSAC 也认，但相对定向不收敛（`PGM_ERR_NOT
 | 算法本身（前方交会） | `native\build\bin\Release\pgm_intersection_test.exe` | 同上，七段检查 |
 | 算法本身（相对定向） | `native\build\bin\Release\pgm_relative_orientation_test.exe` | 同上，七段检查 |
 | 算法本身（核线几何） | `native\build\bin\Release\pgm_epipolar_test.exe` | 同上，八段检查（含核线重采样） |
-| 匹配（第二个 DLL，需 OpenCV） | `native\build\bin\Release\pgm_cv_match_test.exe` | SIFT → 核线 → RANSAC 全链路，真实像对约 40 s |
+| 匹配（第二个 DLL，需 OpenCV） | `native\build\bin\Release\pgm_cv_match_test.exe` | SIFT → 核线 → RANSAC 全链路，真实像对约 45 s |
 | 托管调用 | `dotnet run --project src/Snap/Snap.csproj -c Debug -- --fiducial --dir Data/sim` | 封送对不对、DLL 找得到 |
 | 界面 | `Data/sim/README.md` 第 3 节 | 手动点 8 个框标能不能复现 |
 
