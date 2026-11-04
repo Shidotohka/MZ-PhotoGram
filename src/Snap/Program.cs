@@ -46,6 +46,12 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => string.Equals(a, "--match-relative", StringComparison.OrdinalIgnoreCase)))
+        {
+            MatchRelativeCheck(Get(args, "--dir") ?? Path.Combine("Data", "real", "2_Hammer", "HammerIndex"));
+            return;
+        }
+
         if (args.Any(a => string.Equals(a, "--relative", StringComparison.OrdinalIgnoreCase)))
         {
             RelativeCheck();
@@ -1710,6 +1716,176 @@ internal static class Program
     /// 合成时给的真值上，误差是浮点级的。第二遍把同一批点<b>量化成整数像素</b>再走流程层，
     /// 验的是「点表 → 解算 → 写回工程 → 存盘 → 重开」这条路，误差落在半个像元该有的量级。</para>
     /// </summary>
+    /// <summary>整幅影像 → 8 位灰度缓冲（不缩放，5120² 约 26 MB/幅）。</summary>
+    private static (byte[] Pixels, int Width, int Height) LoadGray(string path)
+    {
+        var decoder = BitmapDecoder.Create(new Uri(Path.GetFullPath(path)),
+                                           BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+        var frame = decoder.Frames[0];
+        BitmapSource gray = frame.Format == PixelFormats.Gray8
+            ? frame
+            : new FormatConvertedBitmap(frame, PixelFormats.Gray8, null, 0);
+
+        var width = gray.PixelWidth;
+        var height = gray.PixelHeight;
+        var pixels = new byte[width * height];
+        gray.CopyPixels(pixels, width, 0);
+        return (pixels, width, height);
+    }
+
+    private static (double Cx, double Cy) Principal(InteriorOrientation io, int width, int height) =>
+        (width / 2.0 + io.X0 / io.PixelSizeMm, height / 2.0 - io.Y0 / io.PixelSizeMm);
+
+    /// <summary>
+    /// M10-b + M11 自检：<b>全程不给绝对外方位</b>，只靠相对定向的 $(\mathbf b,R)$ 跑
+    /// 「自动匹配 → 核线过滤 → 交会」，验四件事：
+    /// ①几何能从 `StereoPair.Relative` 拼出来；②核线残差与有绝对外方位时同量级；
+    /// ③`AutoIntersectTask` 不再被"缺外方位"挡掉；④交会出的是模型坐标，且深度方向有跨度。
+    /// </summary>
+    private static void MatchRelativeCheck(string dir)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        Console.WriteLine("匹配接相对定向（M10-b + M11）自检 — 两片都没有绝对外方位");
+        Console.WriteLine(new string('=', 78));
+
+        const double f = 152.72;
+        const double pixelMm = 0.04503;
+        const double x0Mm = -1.3775;
+
+        var leftPath = Path.Combine(dir, "01-156_50mic.jpg");
+        var rightPath = Path.Combine(dir, "01-155_50mic.jpg");
+        if (!File.Exists(leftPath) || !File.Exists(rightPath))
+        {
+            Console.WriteLine($"FAIL  找不到影像：{leftPath}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var (lp, lw, lh) = LoadGray(leftPath);
+        var (rp, rw, rh) = LoadGray(rightPath);
+        Console.WriteLine($"左 01-156 {lw}x{lh}　右 01-155 {rw}x{rh}");
+        Console.WriteLine();
+
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm, X0 = x0Mm };
+        var left = new ImageItem { Id = "01-156", Width = lw, Height = lh, Interior = io };
+        var right = new ImageItem { Id = "01-155", Width = rw, Height = rh, Interior = io };
+        Check("两片都没有绝对外方位", left.Exterior is null && right.Exterior is null, "Exterior = null");
+
+        // ---- 1 不带核线配一遍，拿点对去解相对定向 ----
+        var plain = NativeAlgorithms.MatchFeatures(
+            lp, lw, lh, lw, rp, rw, rh, rw,
+            pixelMm, Principal(io, lw, lh), Principal(io, rw, rh), null);
+        Check("不带核线能配上点", plain.Points.Count >= 200,
+            $"{plain.Points.Count} 对，每片检出 {plain.Detected}");
+
+        // ---- 2 解相对定向 ----
+        var lmm = new List<ImagePointMm>(plain.Points.Count);
+        var rmm = new List<ImagePointMm>(plain.Points.Count);
+        foreach (var p in plain.Points)
+        {
+            lmm.Add(CoordinateConverter.PixelToImagePlane(p.LeftI, p.LeftJ, io, lw, lh));
+            rmm.Add(CoordinateConverter.PixelToImagePlane(p.RightI, p.RightJ, io, rw, rh));
+        }
+
+        var ro = NativeAlgorithms.SolveRelativeOrientation(lmm, rmm, f);
+        Check("相对定向解出来了", ro.Success,
+            ro.Success
+                ? $"{ro.Iterations} 轮　{ro.UsedCount}/{plain.Points.Count} 参与　q_rms {ro.QRmsMm:0.0000} mm"
+                : ro.Message);
+        if (!ro.Success)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var relative = new RelativeOrientation
+        {
+            ReferenceImageId = left.Id,
+            Bx = ro.Bx,
+            By = ro.By,
+            Bz = ro.Bz,
+            Phi2 = ro.PhiDeg,
+            Omega2 = ro.OmegaDeg,
+            Kappa2 = ro.KappaDeg,
+            Gauge = ro.Gauge,
+            FocalLength = f,
+            Sigma0Mm = ro.Sigma0Mm,
+            RmsQ = ro.QRmsMm,
+        };
+
+        // ---- 3 几何只能来自相对定向 ----
+        var geometry = PairGeometryBuilder.FromRelative(relative, left, right);
+        Check("几何能由 StereoPair.Relative 拼出来", geometry is not null,
+            geometry?.Source ?? "返回 null");
+        if (geometry is null)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Check("成果标成模型坐标", geometry.IsModelCoordinates,
+            $"IsModelCoordinates = {geometry.IsModelCoordinates}");
+
+        // ---- 4 带核线重配：残差应与"有绝对外方位"时同量级 ----
+        var constrained = NativeAlgorithms.MatchFeatures(
+            lp, lw, lh, lw, rp, rw, rh, rw,
+            pixelMm, Principal(io, lw, lh), Principal(io, rw, rh),
+            (geometry.Epipolar.Bx, geometry.Epipolar.By, geometry.Epipolar.Bz,
+             geometry.Epipolar.Rotation, f));
+
+        var epi = constrained.Points.Select(p => p.EpipolarMm).OrderBy(v => v).ToList();
+        var median = epi.Count == 0 ? 0.0 : epi[epi.Count / 2];
+        Check("核线残差与绝对外方位时同量级（中位 < 0.05 mm）", epi.Count > 0 && median < 0.05,
+            epi.Count == 0 ? "一个都没配上" : $"{epi.Count} 对，中位 {median:0.0000} mm");
+        if (epi.Count == 0)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        // ---- 5 端到端：不给 Exterior，只给 relative ----
+        var run = AutoIntersectTask.Run(left, right, lp, lw, rp, rw, 5000, 0.8, 0.10, relative);
+        Check("AutoIntersectTask 只靠相对定向就能跑", run.Success,
+            run.Success ? $"{run.Points.Count} 点　{run.GeometrySource}" : run.Message);
+        if (!run.Success)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Check("结果标成模型坐标", run.IsModelCoordinates, $"IsModelCoordinates = {run.IsModelCoordinates}");
+
+        double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+        foreach (var p in run.Points)
+        {
+            var g = p.Ground.Point;
+            minX = Math.Min(minX, g.X); maxX = Math.Max(maxX, g.X);
+            minY = Math.Min(minY, g.Y); maxY = Math.Max(maxY, g.Y);
+            minZ = Math.Min(minZ, g.Z); maxZ = Math.Max(maxZ, g.Z);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"模型点跨度　X {maxX - minX:0.000}　Y {maxY - minY:0.000}　Z {maxZ - minZ:0.000}" +
+                          "（|b| = 1，比例尺未知，要米制须绝对定向）");
+
+        // 深度方向有跨度才说明是立体，不是把点全压在一个平面上。
+        Check("模型点有深度跨度（不是一张纸）", maxZ - minZ > 1e-6,
+            $"ΔZ = {maxZ - minZ:0.0000}");
+
+        Console.WriteLine();
+        Console.WriteLine(failures == 0 ? "MATCH-RELATIVE PASS" : $"MATCH-RELATIVE FAIL（{failures} 项）");
+        if (failures != 0) Environment.ExitCode = 1;
+    }
+
     private static void RelativeCheck()
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;

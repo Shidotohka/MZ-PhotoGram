@@ -49,8 +49,14 @@ public static class AutoIntersectBatchTask
     /// 跑一批。没有可用的影像时 <see cref="AutoIntersectBatchRun.Points"/> 为空，
     /// <see cref="AutoIntersectBatchRun.Skipped"/> 里会写清每张为什么不能用。
     /// </summary>
+    /// <param name="images">影像与灰度缓冲。</param>
+    /// <param name="stereoPairs">
+    /// 工程里的像对列表，用来找相对定向结果。给了它，即使两张片都没做后方交会也能跑
+    /// （成果是模型坐标）；不给或没解过相对定向，就只认绝对外方位。
+    /// </param>
     public static AutoIntersectBatchRun Run(
         IReadOnlyList<PreparedImage> images,
+        IReadOnlyList<StereoPair>? stereoPairs = null,
         int capacity = 2000,
         double ratio = 0.8,
         double toleranceMm = 0.10)
@@ -88,7 +94,8 @@ public static class AutoIntersectBatchTask
 
                 var run = AutoIntersectTask.Run(
                     left.Image, right.Image, left.Pixels, left.Step, right.Pixels, right.Step,
-                    capacity, ratio, toleranceMm);
+                    capacity, ratio, toleranceMm,
+                    FindRelative(stereoPairs, left.Image.Id, right.Image.Id));
 
                 pairs.Add(new AutoIntersectPair(left.Image, right.Image, run));
                 matched += run.Matched;
@@ -137,9 +144,25 @@ public static class AutoIntersectBatchTask
             return "缺少内定向";
         }
 
-        if (image.Exterior is null)
+        // 外方位不在这里查：有没有几何是**像对级**的事（绝对外方位或这对片的相对定向），
+        // 某一张缺外方位不代表所有配对都跑不了——只要和它对偶的那张有相对定向就行。
+        return null;
+    }
+
+    /// <summary>
+    /// 找这对片的相对定向结果。像对在工程里存的方向可能与本次配对相反，两个方向都要试；
+    /// 元素属于哪一侧由 <see cref="RelativeOrientation.ReferenceImageId"/> 决定，不靠存的方向。
+    /// </summary>
+    private static RelativeOrientation? FindRelative(
+        IReadOnlyList<StereoPair>? pairs, string leftId, string rightId)
+    {
+        if (pairs is null) return null;
+
+        foreach (var pair in pairs)
         {
-            return "缺少绝对外方位（先跑后方交会）";
+            if (pair.Relative is null) continue;
+            if (pair.LeftImageId == leftId && pair.RightImageId == rightId) return pair.Relative;
+            if (pair.LeftImageId == rightId && pair.RightImageId == leftId) return pair.Relative;
         }
 
         return null;

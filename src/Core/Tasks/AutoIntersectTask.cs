@@ -21,8 +21,11 @@ public enum AutoIntersectFailure
     /// <summary>某一张没有内定向结果，量不出像平面坐标。</summary>
     NoInterior,
 
-    /// <summary>某一张没有绝对外方位，交会没有起点。</summary>
-    NoExterior,
+    /// <summary>
+    /// 两片凑不出一套几何：既没有绝对外方位，也没有相对定向结果。
+    /// 有一条就能跑——绝对外方位出地面坐标，相对定向出模型坐标。
+    /// </summary>
+    NoGeometry,
 
     /// <summary>两张片焦距不一致——不是同一个相机。</summary>
     MismatchedFocalLength,
@@ -69,6 +72,15 @@ public sealed class AutoIntersectRun
 
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// true = 上面的点是<b>模型坐标</b>（几何来自相对定向，比例尺未知，不能当米制引用）；
+    /// false = 地面坐标（几何来自绝对外方位）。
+    /// </summary>
+    public bool IsModelCoordinates { get; init; }
+
+    /// <summary>几何从哪来：绝对外方位，还是相对定向（含基准片是哪张）。写日志用。</summary>
+    public string GeometrySource { get; init; } = string.Empty;
+
     public bool Success => Failure == AutoIntersectFailure.None && Points.Count > 0;
 }
 
@@ -95,6 +107,10 @@ public static class AutoIntersectTask
     /// <param name="capacity">最多输出多少对。</param>
     /// <param name="ratio">Lowe 比值阈值。</param>
     /// <param name="toleranceMm">核线距离容差 mm。</param>
+    /// <param name="relative">
+    /// 这对片的相对定向结果，没有就传 null。给了它，即使两张片都没有绝对外方位也能跑
+    /// （成果是模型坐标，比例尺未知）；两张都有绝对外方位时优先用外方位。
+    /// </param>
     public static AutoIntersectRun Run(
         ImageItem? left,
         ImageItem? right,
@@ -104,7 +120,8 @@ public static class AutoIntersectTask
         int rightStep,
         int capacity = 2000,
         double ratio = 0.8,
-        double toleranceMm = 0.10)
+        double toleranceMm = 0.10,
+        RelativeOrientation? relative = null)
     {
         if (left is null) return Fail(AutoIntersectFailure.NoLeftImage, "左窗还没有影像。");
         if (right is null) return Fail(AutoIntersectFailure.NoRightImage, "右窗还没有影像。");
@@ -120,12 +137,25 @@ public static class AutoIntersectTask
             return Fail(AutoIntersectFailure.NoInterior, $"「{which}」还没有内定向结果。");
         }
 
-        if (left.Exterior is null || right.Exterior is null)
+        // 几何有两条来路：绝对外方位（地面坐标）或相对定向（模型坐标）。有一条就够。
+        PairGeometry? geometry;
+        try
         {
-            var which = left.Exterior is null ? left.Id : right.Id;
-            return Fail(AutoIntersectFailure.NoExterior,
-                $"「{which}」还没有绝对外方位：先在「后方交会」里解算它。");
+            geometry = PairGeometryBuilder.FromAbsolute(left, right)
+                       ?? PairGeometryBuilder.FromRelative(relative, left, right);
         }
+        catch (ArgumentException ex)
+        {
+            return Fail(AutoIntersectFailure.NoGeometry, ex.Message);
+        }
+
+        if (geometry is null)
+        {
+            return Fail(AutoIntersectFailure.NoGeometry,
+                "两片既没有绝对外方位、也没有相对定向结果：先给它们做一次相对定向，" +
+                "或者分别在「后方交会」里解算（后者能直接出地面坐标）。");
+        }
+
 
         if (Math.Abs(li.FocalLength - ri.FocalLength) > 1e-6)
         {
@@ -139,7 +169,10 @@ public static class AutoIntersectTask
         }
 
         var f = li.FocalLength;
-        var epipolar = BuildEpipolar(left, right, li, ri);
+
+        // 匹配内核完全不关心 (b,R) 是怎么来的——它只要一个旋转阵和一个单位基线方向。
+        var epipolar = (geometry.Epipolar.Bx, geometry.Epipolar.By, geometry.Epipolar.Bz,
+                        geometry.Epipolar.Rotation, f);
 
         NativeAlgorithms.MatchOutcome match;
         try
@@ -168,8 +201,8 @@ public static class AutoIntersectTask
                     : "配不上一对（纹理重复，或者两张片根本不是同一块地方）。");
         }
 
-        var poseLeft = left.Exterior;
-        var poseRight = right.Exterior;
+        var poseLeft = geometry.LeftPose;
+        var poseRight = geometry.RightPose;
         var points = new List<AutoIntersectPoint>(match.Points.Count);
         var warnings = new List<string>();
         var failed = 0;
@@ -218,83 +251,9 @@ public static class AutoIntersectTask
             Detected = match.Detected,
             Failed = failed,
             Warnings = warnings,
+            IsModelCoordinates = geometry.IsModelCoordinates,
+            GeometrySource = geometry.Source,
         };
-    }
-
-    /// <summary>
-    /// 从两张片的绝对外方位拼出核线几何：基线方向转进左片像空间，姿态差是 $R_R R_L^T$。
-    ///
-    /// <para>这一步不做也行（传 null 就不做核线过滤），但做了能把几何上不可能的候选先扔掉——
-    /// 用绝对外方位当约束，比用相对定向结果更直接。</para>
-    /// </summary>
-    private static (double Bx, double By, double Bz, double[] Rotation, double FocalLengthMm)? BuildEpipolar(
-        ImageItem left, ImageItem right, InteriorOrientation li, InteriorOrientation ri)
-    {
-        if (left.Exterior is not { } eL || right.Exterior is not { } eR) return null;
-
-        var rl = Rotation(eL);
-        var rr = Rotation(eR);
-
-        // b 在地面系里，转到左片像空间：b_img = R_L * (X2 - X1)
-        var dx = eR.Xs - eL.Xs;
-        var dy = eR.Ys - eL.Ys;
-        var dz = eR.Zs - eL.Zs;
-        var length = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-        if (!(length > 1e-9)) return null;
-
-        var b = new double[3];
-        for (var r = 0; r < 3; r++)
-        {
-            b[r] = (rl[r * 3] * dx + rl[r * 3 + 1] * dy + rl[r * 3 + 2] * dz) / length;
-        }
-
-        // 左片像空间 -> 右片像空间：R = R_R * R_L^T
-        var rel = new double[9];
-        for (var r = 0; r < 3; r++)
-        {
-            for (var c = 0; c < 3; c++)
-            {
-                var sum = 0.0;
-                for (var k = 0; k < 3; k++) sum += rr[r * 3 + k] * rl[c * 3 + k];
-                rel[r * 3 + c] = sum;
-            }
-        }
-
-        return (b[0], b[1], b[2], rel, li.FocalLength);
-    }
-
-    /// <summary>教材形式的旋转阵 R = R_kappa R_omega R_phi（与 geometry.hpp 同一套符号）。</summary>
-    private static double[] Rotation(ExteriorOrientation eo)
-    {
-        static double[] Mat(double a, double b, double c, double d, double e, double f,
-                            double g, double h, double i) => new[] { a, b, c, d, e, f, g, h, i };
-
-        var p = eo.Phi * Math.PI / 180.0;
-        var w = eo.Omega * Math.PI / 180.0;
-        var k = eo.Kappa * Math.PI / 180.0;
-
-        var cp = Math.Cos(p); var sp = Math.Sin(p);
-        var cw = Math.Cos(w); var sw = Math.Sin(w);
-        var ck = Math.Cos(k); var sk = Math.Sin(k);
-
-        var rp = Mat(cp, 0, sp, 0, 1, 0, -sp, 0, cp);
-        var rw = Mat(1, 0, 0, 0, cw, sw, 0, -sw, cw);
-        var rk = Mat(ck, sk, 0, -sk, ck, 0, 0, 0, 1);
-
-        return Multiply(rk, Multiply(rw, rp));
-    }
-
-    private static double[] Multiply(double[] a, double[] b)
-    {
-        var result = new double[9];
-        for (var r = 0; r < 3; r++)
-        {
-            for (var c = 0; c < 3; c++)
-            {
-                result[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
-            }
-        }
-        return result;
     }
 
     /// <summary>主点在像元坐标里的位置：像元 → 像平面换算把主点放在中心，再加 x0/y0 的偏移。</summary>

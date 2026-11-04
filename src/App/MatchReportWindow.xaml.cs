@@ -52,6 +52,10 @@ public partial class MatchReportWindow : Window
         var ground = _points.Select(p => p.Ground.Point).ToList();
         _cloud.SetPoints(ground);
 
+        // 相对定向给的几何出的是模型坐标（|b| = 1，比例尺未知），不能写成 "m"。
+        var succeeded = run.Pairs.Where(p => p.Run.Success).ToList();
+        var modelUnits = succeeded.Count > 0 && succeeded.All(p => p.Run.IsModelCoordinates);
+
         if (ground.Count == 0)
         {
             CloudEmpty.Visibility = Visibility.Visible;
@@ -59,10 +63,12 @@ public partial class MatchReportWindow : Window
         }
         else
         {
+            var extents = modelUnits
+                ? $"X {_cloud.ExtentX:0.###} · Y {_cloud.ExtentY:0.###} · Z {_cloud.ExtentZ:0.###}（模型单位，比例尺未知）"
+                : $"X {_cloud.ExtentX:0.#} m · Y {_cloud.ExtentY:0.#} m · Z {_cloud.ExtentZ:0.#} m";
+
             CloudInfo.Text =
-                $"{ground.Count} 个交会点　" +
-                $"X {_cloud.ExtentX:0.#} m · Y {_cloud.ExtentY:0.#} m · Z {_cloud.ExtentZ:0.#} m　" +
-                "拖动旋转 · 滚轮缩放 · 双击复位";
+                $"{ground.Count} 个交会点　{extents}　拖动旋转 · 滚轮缩放 · 双击复位";
         }
 
         // 切到点云页签时视图才第一次拿到真实尺寸，这里补一次重画（SizeChanged 通常已经管到，兜底）。

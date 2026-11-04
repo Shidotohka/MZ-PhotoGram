@@ -257,14 +257,17 @@ public partial class MainWindow
             if (prepared.Count < 2)
             {
                 SetBusy(false, null);
-                DiagSummary.Text = "✗ 可用的影像不足两张：缺内定向或外方位（见日志）。";
+                DiagSummary.Text = "✗ 可用的影像不足两张：缺内定向（见日志）。";
                 DiagSummary.Foreground = ErrBadge;
                 LogSolve("自动匹配", "全部影像", false, "可用的影像不足两张");
                 return;
             }
 
             SetBusy(true, $"正在匹配（{prepared.Count} 张，两两配对）…");
-            var run = await Task.Run(() => AutoIntersectBatchTask.Run(prepared));
+
+            // 带上工程里的像对：有相对定向结果的像对，即使没做后方交会也能跑（出模型坐标）。
+            var pairs = CurrentProject.Pairs.ToList();
+            var run = await Task.Run(() => AutoIntersectBatchTask.Run(prepared, pairs));
 
             ShowAutoIntersect(run, prepared.Count);
         }
@@ -302,11 +305,29 @@ public partial class MainWindow
     private void ShowAutoIntersect(AutoIntersectBatchRun run, int preparedCount)
     {
         _lastMatchRun = run.Success ? run : null;
-        const string title = "前方交会 · 全部影像";
+
+        // 相对定向给的几何出的是模型坐标（比例尺未知），绝对外方位出的才是地面米制坐标。
+        // 两者混在一张表里会让"Z (m)"变成谎话，所以按「有成功的像对里是不是全模型坐标」决定表头。
+        var succeeded = run.Pairs.Where(p => p.Run.Success).ToList();
+        var model = succeeded.Count > 0 && succeeded.All(p => p.Run.IsModelCoordinates);
+        var mixed = succeeded.Any(p => p.Run.IsModelCoordinates) && !model;
+
+        var title = model ? "前方交会 · 全部影像（模型坐标）" : "前方交会 · 全部影像";
 
         // 跳过的影像与像对级提醒都进日志：一句一条，不铺在结果页上。
         foreach (var skip in run.Skipped) Log("!", $"{skip.ImageId}：{skip.Reason}");
         foreach (var warning in run.Warnings) Log("!", warning);
+
+        if (mixed)
+        {
+            Log("!", "有些像对用绝对外方位（地面坐标）、有些用相对定向（模型坐标）：" +
+                     "表里的 XYZ 不是同一个坐标系，别直接比。");
+        }
+
+        foreach (var source in succeeded.Select(p => p.Run.GeometrySource).Distinct())
+        {
+            Log("·", "几何来源：" + source);
+        }
 
         if (!run.Success)
         {
@@ -331,8 +352,17 @@ public partial class MainWindow
         var table = new ResultTable { Title = title }
             .Num("匹配对", "n", run.Matched, "0", "对")
             .Num("交会点", "n", points.Count, "0", "点")
-            .Num("异常", "n", abnormal.Count, "0", "个")
-            .Head("像对", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
+            .Num("异常", "n", abnormal.Count, "0", "个");
+
+        // 模型坐标没有米制含义，表头就不能写 (m)。
+        if (model)
+        {
+            table.Head("像对", "左片 px", "右片 px", "X", "Y", "Z", "交会角");
+        }
+        else
+        {
+            table.Head("像对", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
+        }
 
         foreach (var pair in run.Pairs)
         {
