@@ -501,7 +501,7 @@
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
 
-                                        <Button x:Name="IntersectionAutoButton" Content="自动匹配并交会"
+                                        <Button x:Name="IntersectionAutoButton" Content="自动匹配（全部影像）"
                                                 Click="AutoMatchIntersect_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>

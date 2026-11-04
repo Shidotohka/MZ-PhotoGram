@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows;
@@ -217,41 +218,61 @@ public partial class MainWindow
     // ---------- 自动匹配（SIFT + 核线 + RANSAC → 逐点交会） ----------
 
     /// <summary>
-    /// 不用手点：两张片各自解码成灰度，一次调 <see cref="AutoIntersectTask"/>，
-    /// 匹配出来的每一对都交会一次，然后把整批点摆进结果页。
+    /// 不用手点：把工程里的影像全部解码成灰度，两两匹配、逐对交会。
+    /// 条件不够的影像跳过、写一句原因；一对都没配上的像对也记一句。
     /// </summary>
     private async void AutoMatchIntersect_Click(object sender, RoutedEventArgs e)
     {
-        var views = Workspace.VisibleViews().ToList();
-        if (views.Count != 2 || views[0].Image is not { } left || views[1].Image is not { } right)
+        var images = CurrentProject.Images.ToList();
+        if (images.Count < 2)
         {
-            DiagSummary.Text = "✗ 自动匹配要两张片：把左片拖进左窗、右片拖进右窗。";
+            DiagSummary.Text = "✗ 自动匹配至少要两张影像（数据树里）。";
             DiagSummary.Foreground = ErrBadge;
             return;
         }
 
         IntersectionAutoButton.IsEnabled = false;
-        SetBusy(true, "正在解码两张片…");
         try
         {
-            var leftSource = await EnsureBitmapAsync(left);
-            var rightSource = await EnsureBitmapAsync(right);
-            if (leftSource is null || rightSource is null) return;
+            var prepared = new List<AutoIntersectBatchTask.PreparedImage>(images.Count);
+            var decoded = 0;
 
-            SetBusy(true, "正在匹配…（SIFT 找特征，要几秒到几十秒）");
-            var lg = ToGray8(leftSource);
-            var rg = ToGray8(rightSource);
+            foreach (var image in images)
+            {
+                SetBusy(true, $"正在解码 {image.Id}（{++decoded}/{images.Count}）…");
 
-            var run = await Task.Run(() => AutoIntersectTask.Run(
-                left, right, lg.Pixels, lg.Step, rg.Pixels, rg.Step));
+                if (image.FullPath is null || !File.Exists(image.FullPath))
+                {
+                    Log("!", $"{image.Id}：影像文件不见了，跳过");
+                    continue;
+                }
 
-            ShowAutoIntersect(run, left, right);
+                var source = await EnsureBitmapAsync(image);
+                if (source is null) continue;
+
+                var gray = ToGray8(source);
+                prepared.Add(new AutoIntersectBatchTask.PreparedImage(image, gray.Pixels, gray.Step));
+            }
+
+            if (prepared.Count < 2)
+            {
+                SetBusy(false, null);
+                DiagSummary.Text = "✗ 可用的影像不足两张：缺内定向或外方位（见日志）。";
+                DiagSummary.Foreground = ErrBadge;
+                LogSolve("自动匹配", "全部影像", false, "可用的影像不足两张");
+                return;
+            }
+
+            SetBusy(true, $"正在匹配（{prepared.Count} 张，两两配对）…");
+            var run = await Task.Run(() => AutoIntersectBatchTask.Run(prepared));
+
+            ShowAutoIntersect(run, prepared.Count);
         }
         catch (Exception ex)
         {
             DiagSummary.Text = "✗ 自动匹配失败：" + ex.Message;
             DiagSummary.Foreground = ErrBadge;
-            LogSolve("自动匹配", PairName(), false, ex.Message);
+            LogSolve("自动匹配", "全部影像", false, ex.Message);
             MessageBox.Show(this, ex.Message, "自动匹配失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -261,16 +282,23 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>把一次自动交会摆到结果页上：左边概要、右边逐点。</summary>
-    private void ShowAutoIntersect(AutoIntersectRun run, ImageItem left, ImageItem right)
+    /// <summary>把一次「全工作区自动交会」摆到结果页上：左边概要、右边逐点。</summary>
+    private void ShowAutoIntersect(AutoIntersectBatchRun run, int preparedCount)
     {
-        var title = $"前方交会 · {left.Id} / {right.Id}";
+        const string title = "前方交会 · 全部影像";
+
+        // 跳过的影像与像对级提醒都进日志：一句一条，不铺在结果页上。
+        foreach (var skip in run.Skipped) Log("!", $"{skip.ImageId}：{skip.Reason}");
+        foreach (var warning in run.Warnings) Log("!", warning);
 
         if (!run.Success)
         {
-            ShowResult(FailTable(title, run.Message));
-            LogSolve("自动匹配", PairName(), false, run.Message);
-            DiagSummary.Text = "✗ " + run.Message;
+            var message = run.Skipped.Count == 0
+                ? "所有像对都没配上点。"
+                : $"所有像对都没配上点（{run.Skipped.Count} 张影像被跳过，原因见日志）。";
+            ShowResult(FailTable(title, message));
+            LogSolve("自动匹配", "全部影像", false, message);
+            DiagSummary.Text = "✗ " + message;
             DiagSummary.Foreground = ErrBadge;
             return;
         }
@@ -280,26 +308,35 @@ public partial class MainWindow
         var medianAngle = angles[angles.Count / 2];
 
         var table = new ResultTable { Title = title }
+            .Num("影像", "n", preparedCount, "0", "张")
+            .Num("跳过的影像", "n", run.Skipped.Count, "0", "张")
+            .Num("像对", "n", run.Pairs.Count, "0", "对")
             .Num("匹配对", "n", run.Matched, "0", "对")
-            .Num("RANSAC 内点", "n", run.Inliers, "0", "对")
-            .Num("检出特征", "n", run.Detected, "0", "个")
             .Num("交会成功", "n", points.Count, "0", "点")
             .Num("交会失败", "n", run.Failed, "0", "对")
             .Num("交会角中位数", "γ", medianAngle, "0.00", "°")
-            .Head("点号", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
+            .Head("序号", "像对", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
 
         const int kShown = 300;
-        for (var k = 0; k < points.Count && k < kShown; k++)
+        var index = 0;
+        foreach (var pair in run.Pairs)
         {
-            var p = points[k];
-            table.Row(
-                (k + 1).ToString(),
-                $"{p.LeftI:0.0}, {p.LeftJ:0.0}",
-                $"{p.RightI:0.0}, {p.RightJ:0.0}",
-                Fmt(p.Ground.Point.X, "0.000"),
-                Fmt(p.Ground.Point.Y, "0.000"),
-                Fmt(p.Ground.Point.Z, "0.000"),
-                Format.Fixed(p.Ground.ConvergenceAngleDeg, "0.00"));
+            var pairName = $"{pair.Left.Id} / {pair.Right.Id}";
+            foreach (var p in pair.Run.Points)
+            {
+                if (++index > kShown) break;
+                table.Row(
+                    index.ToString(),
+                    pairName,
+                    $"{p.LeftI:0.0}, {p.LeftJ:0.0}",
+                    $"{p.RightI:0.0}, {p.RightJ:0.0}",
+                    Fmt(p.Ground.Point.X, "0.000"),
+                    Fmt(p.Ground.Point.Y, "0.000"),
+                    Fmt(p.Ground.Point.Z, "0.000"),
+                    Format.Fixed(p.Ground.ConvergenceAngleDeg, "0.00"));
+            }
+
+            if (index > kShown) break;
         }
 
         if (points.Count > kShown)
@@ -307,16 +344,15 @@ public partial class MainWindow
             table.Note = $"只列前 {kShown} 个点，共 {points.Count} 个。";
         }
 
-        LogSolve("自动匹配", PairName(), true,
-            $"匹配 {run.Matched} 对　内点 {run.Inliers}　特征 {run.Detected}　" +
+        LogSolve("自动匹配", "全部影像", true,
+            $"{preparedCount} 张　{run.Pairs.Count} 对　匹配 {run.Matched} 对　" +
             $"交会 {points.Count} 点（失败 {run.Failed}）　交会角中位 {medianAngle:0.00}°");
 
-        foreach (var warning in run.Warnings) Log("!", warning);
-
-        DiagSummary.Text = run.Warnings.Count == 0
+        var warnings = run.Warnings.Count + run.Skipped.Count;
+        DiagSummary.Text = warnings == 0
             ? $"✓ 自动交会完成，{points.Count} 个点"
-            : $"! 自动交会完成，{points.Count} 个点，有 {run.Warnings.Count} 条提醒（见日志）";
-        DiagSummary.Foreground = run.Warnings.Count == 0 ? OkBadge : WarnBadge;
+            : $"! 自动交会完成，{points.Count} 个点，{warnings} 条提醒（见日志）";
+        DiagSummary.Foreground = warnings == 0 ? OkBadge : WarnBadge;
 
         ShowResult(table);
     }
