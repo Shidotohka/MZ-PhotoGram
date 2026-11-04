@@ -29,20 +29,23 @@ native/
 │   └── photogrammetry.h           对外 C ABI，托管侧唯一依赖
 ├── src/
 │   ├── internal.hpp               库内部声明
-│   ├── geometry.hpp               3×3 线性代数与教材旋转矩阵，两个算法共用
+│   ├── geometry.hpp               3×3 线性代数与教材旋转矩阵，各算法共用
+│   ├── linalg.hpp                 对称阵特征分解与求解（从 resection.cpp 提出来共用）
 │   ├── error.cpp                  错误码、版本、pgm_last_error
 │   ├── interior_orientation.cpp   内定向：六参数仿射最小二乘
 │   ├── resection.cpp              空间后方交会：共线方程 + 迭代最小二乘
-│   └── forward_intersection.cpp   空间前方交会：三式最小二乘解投影系数
+│   ├── forward_intersection.cpp   空间前方交会：三式最小二乘解投影系数
+│   └── relative_orientation.cpp   相对定向：共面条件迭代 + 规准 + 留一法粗差剔除
 └── tests/
     ├── test_interior_orientation.cpp   读 Data/sim 的合成数据做验收
     ├── test_resection.cpp              后方交会自检：约定对表、雅可比、往返、噪声、退化
-    └── test_forward_intersection.cpp   前方交会自检：往返、与教材对表、旁向反证、精度
+    ├── test_forward_intersection.cpp   前方交会自检：往返、与教材对表、旁向反证、精度
+    └── test_relative_orientation.cpp   相对定向自检：七段（含旁向 30%、纯旁向、粗差）
 ```
 
-$R$ 的约定只写一份，放在 `src/geometry.hpp`，两个算法都 include 它。这份约定写歪了程序照样出数——上次外方位解错就栽在这类「两份约定」上。
+$R$ 的约定只写一份，放在 `src/geometry.hpp`，各算法都 include 它。这份约定写歪了程序照样出数——上次外方位解错就栽在这类「两份约定」上。
 
-后续算法按同样方式加文件：`relative_orientation.cpp`（M6）、`absolute_orientation.cpp`（M7）。
+后续算法按同样方式加文件：`absolute_orientation.cpp`（M7）。
 
 ---
 
@@ -60,6 +63,7 @@ native/build/bin/Release/photogrammetry.dll
 native/build/bin/Release/pgm_test.exe
 native/build/bin/Release/pgm_resection_test.exe
 native/build/bin/Release/pgm_intersection_test.exe
+native/build/bin/Release/pgm_relative_orientation_test.exe
 ```
 
 `src/Directory.Build.props` 会把 DLL 复制到托管项目的输出目录。
@@ -81,7 +85,7 @@ native/build/bin/Release/pgm_intersection_test.exe
 |---|---|---|
 | 0 | `PGM_OK` | 成功 |
 | 1 | `PGM_ERR_NULL_ARGUMENT` | 指针为空 |
-| 2 | `PGM_ERR_TOO_FEW_POINTS` | 点数不足（内定向框标 < 4，后方交会控制点 < 4） |
+| 2 | `PGM_ERR_TOO_FEW_POINTS` | 点数不足（内定向框标 < 4，后方交会控制点 < 4，相对定向同名点对 < 5） |
 | 3 | `PGM_ERR_DEGENERATE` | 几何构型退化：近似共线、点重合、法方程秩亏 |
 | 4 | `PGM_ERR_INVALID_ARGUMENT` | 参数非法、含非有限值、物点落在相机背后 |
 | 5 | `PGM_ERR_INTERNAL` | 未预期异常 |
@@ -171,6 +175,34 @@ $$N_1\mathbf u_1-N_2\mathbf u_2=\mathbf B,\qquad
 
 ---
 
+## 现有接口：相对定向
+
+```c
+int32_t pgm_relative_orientation(const pgm_relative_orientation_input*  in,
+                                 pgm_relative_orientation_output*       out);
+
+int32_t pgm_relative_orientation_design(...);   /* 诊断用：输出共面条件的误差方程 */
+```
+
+输入一串同名像点（左右片各一对像平面坐标 mm）与主距，输出 5 个相对方位元素、$\sigma_0$、$q_{\mathrm{rms}}$、条件数、实际冻结的基线分量（`gauge`），以及逐点的 $q$ 与剔除标记。
+
+模型（共面条件，上下视差为观测残差）：
+
+$$\begin{vmatrix}b_x&b_y&b_z\\u_1&v_1&w_1\\u_2&v_2&w_2\end{vmatrix}=0,\qquad
+\mathbf u=R^\top\begin{bmatrix}x\\y\\-f\end{bmatrix}$$
+
+实现要点：
+
+1. **初值取平均视差方向**、解完按 $\sqrt{b_x^2+b_y^2+b_z^2}$ 规准。$|b|=1$ 是自由网的规准，模型比例尺由它定；绝对定向的 $\lambda$ 再拉回米制。
+2. **教材形式（冻结 $b_x=B$、初值 $(1,0,0)$）隐含航向像对**：旁向像对 $b_x\to0$ 时那一列塌成零，实测会停在残差不为零的假驻点。改成"冻结基线主分量"后，旁向与纯旁向像对都是 4 轮收敛，航向像对自动退回教材形式（`gauge` 上报冻结的是哪一个）。
+3. **粗差用留一法**：拿掉候选点重解，$\sigma_0$ 缩 2.5 倍才算粗差；$|q|>3\sigma_0$ 那套在 $n\le14$ 时剔不掉自己。最多 4 轮，剔完至少留 7 对。
+4. **两套残差**：$\sigma_0$（残差单位权）与 $q_{\mathrm{rms}}$（上下视差均方根）比值确定，实测 1.599 对理论 1.608。
+5. **与 M6.5 的接口**：解出的三个角与 `rotation` 按本库约定输出，左片取 $(0,0,0,0,0,0)$、右片取 $(\mathbf b,\varphi,\omega,\kappa)$ 就能直接喂 `pgm_forward_intersection`。
+
+推导、规准与失败码见 [Docs/相对定向算法.md](../Docs/相对定向算法.md) §11。
+
+---
+
 ## 验证
 
 三层，从下到上：
@@ -180,6 +212,7 @@ $$N_1\mathbf u_1-N_2\mathbf u_2=\mathbf B,\qquad
 | 算法本身（内定向） | `native\build\bin\Release\pgm_test.exe Data/sim` | DLL 算得对不对 |
 | 算法本身（后方交会） | `native\build\bin\Release\pgm_resection_test.exe` | 同上，六段检查 |
 | 算法本身（前方交会） | `native\build\bin\Release\pgm_intersection_test.exe` | 同上，七段检查 |
+| 算法本身（相对定向） | `native\build\bin\Release\pgm_relative_orientation_test.exe` | 同上，七段检查 |
 | 托管调用 | `dotnet run --project src/Snap/Snap.csproj -c Debug -- --fiducial --dir Data/sim` | 封送对不对、DLL 找得到 |
 | 界面 | `Data/sim/README.md` 第 3 节 | 手动点 8 个框标能不能复现 |
 
@@ -218,6 +251,18 @@ $$N_1\mathbf u_1-N_2\mathbf u_2=\mathbf B,\qquad
 5 精度传播 vs 蒙特卡洛         4000 次实现，m_X/m_Y/m_Z 相对差 0.2–1.5%
 6 残余量真的在测东西           注入 0.05 mm 上下视差 → 最近距离 0.9499 m（手估 0.96 m）
 7 退化与输入错误               零基线、同名点配错、主距非正、负中误差、空指针
+```
+
+相对定向那一层（七段，见 [Docs/相对定向算法.md](../Docs/相对定向算法.md#L179) 的实测表）：
+
+```
+1 合成往返                     基线 1.2e-15、角 5.8e-16；无噪声时 q_rms 与 σ0 归零
+2 雅可比对表                   解析式 vs 中心差分，六列最大 9.9e-11
+3 旁向 30% 像对                4 轮收敛，q_rms 6.5e-15 mm，gauge=1（冻结 b_y）
+4 纯旁向（b_x=0）              4 轮收敛，解出的 b_y 有界
+5 噪声 0.02 mm                 200 次全部收敛，q_rms 均值 0.0165 mm，与蒙特卡洛一致
+6 退化闸门                     4 对点、重合点、共线各有明确错误码
+7 粗差                         干净数据 0 剔；1 mm / 2 mm 的错点各剔 1 个，剔完元素回到 1e-9
 ```
 
 ---
