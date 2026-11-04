@@ -321,30 +321,26 @@ public partial class MainWindow
         }
 
         var points = run.Points;
-        var angles = points.Select(p => p.Ground.ConvergenceAngleDeg).OrderBy(a => a).ToList();
-        var medianAngle = angles[angles.Count / 2];
+
+        // 只列异常点：核线残差超 0.1 mm 或交会角小于 15°。正常的几千个点不看。
+        var abnormal = points
+            .Where(p => p.EpipolarMm > 0.10 || p.Ground.ConvergenceAngleDeg < 15.0)
+            .Take(200)
+            .ToList();
 
         var table = new ResultTable { Title = title }
-            .Num("影像", "n", preparedCount, "0", "张")
-            .Num("跳过的影像", "n", run.Skipped.Count, "0", "张")
-            .Num("像对", "n", run.Pairs.Count, "0", "对")
             .Num("匹配对", "n", run.Matched, "0", "对")
-            .Num("交会成功", "n", points.Count, "0", "点")
-            .Num("交会失败", "n", run.Failed, "0", "对")
-            .Num("交会角中位数", "γ", medianAngle, "0.00", "°")
-            .Head("序号", "像对", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
+            .Num("交会点", "n", points.Count, "0", "点")
+            .Num("异常", "n", abnormal.Count, "0", "个")
+            .Head("像对", "左片 px", "右片 px", "X (m)", "Y (m)", "Z (m)", "交会角");
 
-        const int kShown = 300;
-        var index = 0;
         foreach (var pair in run.Pairs)
         {
-            var pairName = $"{pair.Left.Id} / {pair.Right.Id}";
             foreach (var p in pair.Run.Points)
             {
-                if (++index > kShown) break;
+                if (!abnormal.Contains(p)) continue;
                 table.Row(
-                    index.ToString(),
-                    pairName,
+                    $"{pair.Left.Id} / {pair.Right.Id}",
                     $"{p.LeftI:0.0}, {p.LeftJ:0.0}",
                     $"{p.RightI:0.0}, {p.RightJ:0.0}",
                     Fmt(p.Ground.Point.X, "0.000"),
@@ -352,22 +348,20 @@ public partial class MainWindow
                     Fmt(p.Ground.Point.Z, "0.000"),
                     Format.Fixed(p.Ground.ConvergenceAngleDeg, "0.00"));
             }
-
-            if (index > kShown) break;
         }
 
-        if (points.Count > kShown)
+        if (abnormal.Count == 0)
         {
-            table.Note = $"只列前 {kShown} 个点，共 {points.Count} 个。";
+            table.Note = "没有异常点。";
         }
 
         LogSolve("自动匹配", "全部影像", true,
             $"{preparedCount} 张　{run.Pairs.Count} 对　匹配 {run.Matched} 对　" +
-            $"交会 {points.Count} 点（失败 {run.Failed}）　交会角中位 {medianAngle:0.00}°");
+            $"交会 {points.Count} 点　异常 {abnormal.Count} 个");
 
         var warnings = run.Warnings.Count + run.Skipped.Count;
         DiagSummary.Text = warnings == 0
-            ? $"✓ 自动交会完成，{points.Count} 个点"
+            ? $"✓ 自动交会完成，{points.Count} 个点，无异常"
             : $"! 自动交会完成，{points.Count} 个点，{warnings} 条提醒（见日志）";
         DiagSummary.Foreground = warnings == 0 ? OkBadge : WarnBadge;
 
