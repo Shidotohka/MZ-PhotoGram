@@ -60,9 +60,9 @@
                             BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="4"
                             ClipToBounds="True">
                         <Grid>
-                            <Image x:Name="CloudImage" Stretch="Fill"
-                                   RenderOptions.BitmapScalingMode="NearestNeighbor"/>
-                            <Canvas x:Name="CloudOverlay" Background="Transparent" ClipToBounds="True"/>
+                            <!-- 三维视口由 PointCloudView 在代码里建（HelixViewport3D），
+                                 放 XAML 里要给 Window 加 xmlns，得不偿失。 -->
+                            <Grid x:Name="CloudHost"/>
                             <TextBlock x:Name="CloudEmpty" Text="没有交会点"
                                        Foreground="{StaticResource DimBrush}" IsHitTestVisible="False"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"

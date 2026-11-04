@@ -88,7 +88,8 @@ internal static class Program
         if (args.Any(a => string.Equals(a, "--cloud-demo", StringComparison.OrdinalIgnoreCase)))
         {
             CloudDemo(Get(args, "--out") ?? "cloud.png",
-                      args.Any(a => string.Equals(a, "--hist", StringComparison.OrdinalIgnoreCase)));
+                      args.Any(a => string.Equals(a, "--hist", StringComparison.OrdinalIgnoreCase)),
+                      args.Any(a => string.Equals(a, "--empty", StringComparison.OrdinalIgnoreCase)));
             return;
         }
 
@@ -432,10 +433,10 @@ internal static class Program
     /// <see cref="MatchReportWindow"/>，走真实构造路径——验投影、深度雾、包围盒、轴标。
     /// <paramref name="histogram"/> 为真时切回直方图页签，用来确认两页没互相踩。
     /// </summary>
-    private static void CloudDemo(string outPath, bool histogram)
+    private static void CloudDemo(string outPath, bool histogram, bool empty)
     {
         var random = new Random(12345);
-        const int count = 4000;
+        var count = empty ? 0 : 4000;
         var points = new List<AutoIntersectPoint>(count);
 
         for (var k = 0; k < count; k++)

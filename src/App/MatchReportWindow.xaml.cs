@@ -48,7 +48,7 @@ public partial class MatchReportWindow : Window
         ResidualCanvas.SizeChanged += (_, _) => Draw(ResidualCanvas, residuals, "mm");
         AngleCanvas.SizeChanged += (_, _) => Draw(AngleCanvas, angles, "°");
 
-        _cloud = new PointCloudView(CloudImage, CloudOverlay);
+        _cloud = new PointCloudView(CloudHost);
         var ground = _points.Select(p => p.Ground.Point).ToList();
         _cloud.SetPoints(ground);
 

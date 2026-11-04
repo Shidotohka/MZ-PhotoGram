@@ -47,3 +47,6 @@ Desktop.ini
 /Data/
 
 /Design/
+
+# 无网机器手动拷进来的 .nupkg（后路见 src/NuGet.config 的注释）
+/local-packages/
