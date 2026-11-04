@@ -49,6 +49,44 @@ add_executable(pgm_epipolar_test tests/test_epipolar.cpp)
 target_link_libraries(pgm_epipolar_test PRIVATE photogrammetry)
 
 enable_testing()
+
+# ---------------------------------------------------------------- CV 匹配（第二个 DLL）
+#
+# 只有这一个目标链接 OpenCV。找不到就跳过，其余算法照常构建——
+# 「主 DLL 零依赖」这条不是口号，见 Docs/界面设计规范.md ADR-22。
+# 配置时带上 vcpkg 的工具链：
+#   cmake -S native -B native/build -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+find_package(OpenCV CONFIG QUIET)
+
+if(OpenCV_FOUND)
+    message(STATUS "找到 OpenCV ${OpenCV_VERSION}：构建 photogrammetry_cv")
+
+    add_library(photogrammetry_cv SHARED src/cv_match.cpp)
+    target_include_directories(photogrammetry_cv PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(photogrammetry_cv PRIVATE PGM_CV_BUILDING_DLL)
+    target_link_libraries(photogrammetry_cv PRIVATE photogrammetry ${OpenCV_LIBS})
+
+    add_executable(pgm_cv_match_test tests/test_cv_match.cpp)
+    target_link_libraries(pgm_cv_match_test PRIVATE photogrammetry_cv photogrammetry ${OpenCV_LIBS})
+
+    # 运行时需要 opencv_*.dll 与 exe 并排；vcpkg 的运行时都在 installed/<triplet>/bin
+    if(DEFINED VCPKG_INSTALLED_DIR)
+        file(GLOB _opencv_runtime_dlls "${VCPKG_INSTALLED_DIR}/x64-windows/bin/opencv*.dll")
+        foreach(_dll ${_opencv_runtime_dlls})
+            add_custom_command(TARGET photogrammetry_cv POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_dll}" "$<TARGET_FILE_DIR:photogrammetry_cv>")
+        endforeach()
+    endif()
+
+    add_test(NAME cv_match COMMAND pgm_cv_match_test
+             ${CMAKE_CURRENT_SOURCE_DIR}/../Data/real/2_Hammer/HammerIndex/01-156_50mic.jpg
+             ${CMAKE_CURRENT_SOURCE_DIR}/../Data/real/2_Hammer/HammerIndex/01-155_50mic.jpg
+             0.04503)
+else()
+    message(STATUS "未找到 OpenCV：跳过 photogrammetry_cv（匹配模块不可用，其余照常）")
+endif()
+
 add_test(NAME interior_orientation
          COMMAND pgm_test ${CMAKE_CURRENT_SOURCE_DIR}/../Data/sim)
 add_test(NAME resection COMMAND pgm_resection_test)

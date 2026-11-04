@@ -241,6 +241,56 @@ $$\mathbf n=\mathbf b\times\mathbf d_1,\qquad \mathbf m=R\,\mathbf n,\qquad m_u 
 
 ---
 
+## 现有接口：计算机视觉匹配（第二个 DLL）
+
+**这个模块链接 OpenCV**，单独编成 `photogrammetry_cv.dll`；`photogrammetry.dll` 仍然是零第三方依赖（ADR-22）。
+头文件是 `include/photogrammetry_cv.h`，与 `photogrammetry.h` 分开：谁要匹配谁才链 OpenCV。
+
+```c
+int32_t pgm_cv_match(const pgm_cv_match_input* in, int32_t capacity,
+                     double* out_left_i,  double* out_left_j,
+                     double* out_right_i, double* out_right_j,
+                     double* out_score, double* out_epipolar_mm,
+                     int32_t* out_count, int32_t* out_inliers, int32_t* out_detected);
+```
+
+一次调用做完五件事，**中间不回调调用方**：
+
+1. SIFT 检特征（每片封顶 8000 条；5120² 原片不封顶会出十万级特征，匹配时间全耗在算距离上）
+2. 最近邻 + Lowe 比值检验（0.8）
+3. **互为最佳**校验：反向再查一遍，挡住重复纹理
+4. 核线过滤：$|$点到核线距离$|$ > 容差（默认 0.10 mm）直接丢，调的是本库的 `pgm_epipolar_distance`
+5. RANSAC 复核基础矩阵（3 px），只留内点
+
+一次调用的数据量：`5120 × 5120` 两幅灰度缓冲进，最多 `capacity` 组像元坐标出。**不是逐点调用**——
+跨 ABI 的粒度是"一次匹配任务"，这是 §8.2 的硬规定。
+
+构建（需要 vcpkg 装好 OpenCV）：
+
+```powershell
+cmake -S native -B native/build -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build native/build --config Release
+native\build\bin\Release\pgm_cv_match_test.exe
+```
+
+`photogrammetry_cv` 的 POST_BUILD 会把 `opencv_*.dll` 与 `z.dll`/`jpeg62.dll` 等一起拷到 exe 旁边；
+**换机器跑要连这些 DLL 一起带走**。没装 OpenCV 时 CMake 只打一行提示，其余算法照常编、照常测。
+
+实测（Hammer `01-156` × `01-155`，两片同航线、`5120²`、像元 0.04503 mm、$f=152.72$ mm）：
+
+```
+检出 8001 特征/片　配上 987 对（RANSAC 内点 987）
+相对定向：4 轮　987/987 参与　q_rms 0.0168 mm　σ0 0.0190 mm　冻结 b_u
+核线过滤后：968 对　|核线距离| 中位数 0.0060 mm，最大 0.021 mm
+```
+
+**已知不行的一档**：`PointPos/` 里那两张 512² 缩略图（`01-156` × `02-165`，跨航线）。
+SIFT 能配出 106 对、RANSAC 也认，但相对定向不收敛（`PGM_ERR_NOT_CONVERGED`）——
+10 倍降采样之后像点定位精度与重叠区都不够。**匹配要用原片**，缩略图只适合看构图。
+
+---
+
 ## 验证
 
 三层，从下到上：
@@ -252,6 +302,7 @@ $$\mathbf n=\mathbf b\times\mathbf d_1,\qquad \mathbf m=R\,\mathbf n,\qquad m_u 
 | 算法本身（前方交会） | `native\build\bin\Release\pgm_intersection_test.exe` | 同上，七段检查 |
 | 算法本身（相对定向） | `native\build\bin\Release\pgm_relative_orientation_test.exe` | 同上，七段检查 |
 | 算法本身（核线几何） | `native\build\bin\Release\pgm_epipolar_test.exe` | 同上，六段检查 |
+| 匹配（第二个 DLL，需 OpenCV） | `native\build\bin\Release\pgm_cv_match_test.exe` | SIFT → 核线 → RANSAC 全链路，真实像对约 40 s |
 | 托管调用 | `dotnet run --project src/Snap/Snap.csproj -c Debug -- --fiducial --dir Data/sim` | 封送对不对、DLL 找得到 |
 | 界面 | `Data/sim/README.md` 第 3 节 | 手动点 8 个框标能不能复现 |
 
