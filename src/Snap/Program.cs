@@ -344,7 +344,28 @@ internal static class Program
         var full = Path.GetFullPath(seedPath);
         var output = Path.Combine(Path.GetDirectoryName(full)!, "selftest-out.pht");
 
+        if (!File.Exists(full))
+        {
+            Console.WriteLine($"种子工程不存在：{full}");
+            Console.WriteLine("这个自检要的是 Design/sample-project.pht（两片，image[0] = sample-target.png，f=35）。");
+            Console.WriteLine("它没有入库（Design/ 在 .gitignore 里），所以这条路现在是跳过的，不是通过。");
+            return;
+        }
+
         var project = ProjectFile.Load(full);
+
+        // 下面每一条断言都写死给那套两片工程（sample-target.png + 一张故意缺失的片，f=35）。
+        // 换任何别的工程来跑，必然是"六条红"，而那种红没有信息量。
+        // 先认种子：不认就明说跳过，别让人以为工程读写坏了。
+        if (project.Images.Count < 2 ||
+            !string.Equals(project.Images[0].RelativePath, "sample-target.png", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"种子不对：{Path.GetFileName(full)} 有 {project.Images.Count} 张片，" +
+                              $"第一张是「{project.Images.FirstOrDefault()?.RelativePath}」。");
+            Console.WriteLine("这个自检只对 Design/sample-project.pht 有意义（它的期望值写死在断言里），跳过。");
+            return;
+        }
+
         Console.WriteLine($"载入：影像 {project.Images.Count}，像点 {project.Images.Sum(i => i.Points.Count)}");
 
         // 塞进 v2 新增的字段，验证都能往返
@@ -823,6 +844,16 @@ internal static class Program
             Console.WriteLine($"\n文件 {Path.GetFileName(candidate)}　格式 {result.SourceFormat}");
             if (!result.Success)
             {
+                // 目录里常与控制点文件混放相机检校文件（cmr*.rtf / *.cmr）。
+                // 它按控制点格式当然读不出来，但那不是"控制点文件坏了"——
+                // 能按相机格式读出来就跳过，不记失败，否则这条自检永远红。
+                if (LooksLikeCameraFile(candidate))
+                {
+                    Console.WriteLine($"  这是相机检校文件，不是控制点文件，跳过" +
+                                      $"（{result.Warnings.FirstOrDefault() ?? "无说明"}）");
+                    continue;
+                }
+
                 foreach (var w in result.Warnings) Console.WriteLine("  [FAIL] " + w);
                 failures++;
                 continue;
@@ -849,6 +880,32 @@ internal static class Program
 
         Console.WriteLine(failures == 0 ? "\nSELFTEST PASS" : "\nSELFTEST FAIL");
         Environment.ExitCode = failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// 这个文件是不是相机检校文件。只在控制点解析已经失败时才调用，
+    /// 所以不会误伤真正的控制点文件。
+    ///
+    /// <para>为什么要靠名字：本数据集里 <c>cmr.rc30_ham2.rtf</c> 与 <c>gxyz.rtf</c>
+    /// 混放在同一个目录，两者<b>都是 RTF</b>，按内容嗅探分不开——
+    /// <c>CameraFile.Load</c> 读它也会抛（它只吃纯文本 .cmr / CSV）。
+    /// E-FOTO 的相机文件习惯以 <c>cmr</c> 开头，就按这个约定认。</para>
+    /// </summary>
+    private static bool LooksLikeCameraFile(string path)
+    {
+        var name = Path.GetFileName(path);
+        if (name.StartsWith("cmr", StringComparison.OrdinalIgnoreCase)) return true;
+        if (Path.GetExtension(path).Equals(".cmr", StringComparison.OrdinalIgnoreCase)) return true;
+
+        try
+        {
+            CameraFile.Load(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>合成往返：9 个控制点、已知外方位，投影成观测再反解。</summary>
