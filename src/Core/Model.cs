@@ -313,9 +313,6 @@ public sealed class Project
     /// <summary>放大影像目录的运行时绝对路径，不写盘。</summary>
     public string? ControlPointZoomDirectoryFullPath { get; set; }
 
-    /// <summary>按 Id 找相机，找不到返回 null。</summary>
-    public Camera? FindCamera(string? id) =>
-        id is null ? null : Cameras.FirstOrDefault(c => c.Id == id);
     public List<StereoPair> Pairs { get; } = new();
     public List<ModelItem> Models { get; } = new();
     public List<ResultRef> Results { get; } = new();

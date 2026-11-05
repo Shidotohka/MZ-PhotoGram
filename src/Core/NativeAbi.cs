@@ -278,9 +278,6 @@ internal static class NativeAbi
         out int outCount, out int outInliers, out int outDetected);
 
     [DllImport(LibraryCv, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern IntPtr pgm_cv_version();
-
-    [DllImport(LibraryCv, CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr pgm_cv_last_error();
 
 }

@@ -86,7 +86,7 @@ PGM_CV_API int32_t pgm_cv_match(const pgm_cv_match_input* in,
                                 int32_t* out_inliers,
                                 int32_t* out_detected);
 
-/* 形如 "pgm-cv 1.0 / OpenCV 4.12.0"。 */
+/* 形如 "pgm-cv 1.0 / OpenCV 4.12.0"。给自检打印用，确认加载的是哪份 OpenCV。 */
 PGM_CV_API const char* pgm_cv_version(void);
 
 /* 最近一次调用失败的原因（UTF-8）。线程局部，返回的指针在下一次调用前有效。 */
