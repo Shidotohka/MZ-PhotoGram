@@ -541,6 +541,30 @@
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
                                     </StackPanel>
 
+                                    <!-- 模型交会：控制点在这里刺，两片各一次，然后求模型点 -->
+                                    <StackPanel x:Name="ModelPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock x:Name="ModelHint" FontSize="11"
+                                                   Foreground="{StaticResource DimBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <Border Background="{StaticResource PanelBrush}"
+                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
+                                            <TextBlock x:Name="ModelPairText" Text="像对 —"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       Foreground="{StaticResource DimBrush}"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <Button Content="载入控制点文件…" Click="LoadControlPoints_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+
+                                        <Button x:Name="ModelSolveButton" Content="求模型点"
+                                                Click="SolveModel_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+                                    </StackPanel>
                                     <StackPanel x:Name="AbsolutePanel" Visibility="Collapsed" Margin="0,8,0,0">
                                         <TextBlock x:Name="AbsoluteHint" FontSize="11"
                                                    Foreground="{StaticResource DimBrush}"
@@ -709,6 +733,29 @@
                                     <DataGridTextColumn Header="说明" Width="*" Binding="{Binding Note}"/>
                                 </DataGrid.Columns>
                             </DataGrid>
+
+                    <!-- 模型交会：控制点在模型系里的坐标（两片像点交会出来的，比例尺未知） -->
+                    <DataGrid x:Name="ModelGrid" Style="{StaticResource MeasureGridStyle}"
+                              Visibility="Collapsed"
+                              SelectionChanged="ModelGrid_SelectionChanged">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu Style="{StaticResource MenuPopup}">
+                                <MenuItem Header="设为控制点" Click="GcpSetControl_Click"/>
+                                <MenuItem Header="设为检查点（不参与解算）" Click="GcpSetCheck_Click"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="点号" Width="82" Binding="{Binding Id}"/>
+                            <DataGridTextColumn Header="类型" Width="66" Binding="{Binding Type}"/>
+                            <DataGridTextColumn Header="左片像素" Width="140" Binding="{Binding LeftPixel}"/>
+                            <DataGridTextColumn Header="右片像素" Width="140" Binding="{Binding RightPixel}"/>
+                            <DataGridTextColumn Header="模型 X" Width="112" Binding="{Binding ModelX}"/>
+                            <DataGridTextColumn Header="模型 Y" Width="112" Binding="{Binding ModelY}"/>
+                            <DataGridTextColumn Header="模型 Z" Width="112" Binding="{Binding ModelZ}"/>
+                            <DataGridTextColumn Header="交会角" Width="84" Binding="{Binding Convergence}"/>
+                            <DataGridTextColumn Header="说明" Width="*" Binding="{Binding Note}"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
                         </Grid>
                     </Grid>
 

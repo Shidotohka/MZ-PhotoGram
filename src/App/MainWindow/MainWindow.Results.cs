@@ -377,6 +377,37 @@ public partial class MainWindow
         return table;
     }
 
+    // ---------- 模型交会 ----------
+
+    private ResultTable ModelResultTable(ModelIntersectionOutcome outcome)
+    {
+        var table = new ResultTable { Title = $"模型交会 · {outcome.PairLabel}" };
+
+        table.Add("控制点", "—", outcome.Observations.Count.ToString(CultureInfo.InvariantCulture), "个",
+            $"其中检查点 {outcome.Observations.Count(o => o.Type == GcpType.CheckPoint)} 个");
+
+        var worst = outcome.Observations.Count == 0
+            ? double.NaN
+            : outcome.Observations.Min(o => o.ConvergenceAngleDeg);
+        table.Num("最差交会角", "min γ", worst, "0.00", "°",
+            worst < 15.0 ? "深度不可靠" : "越大越稳", worst < 15.0);
+
+        table.Add("坐标系", "—", "模型系（比例尺未知）", "", "|b| = 1，形状对、尺寸不对");
+
+        table.Head("点号", "模型 X", "模型 Y", "模型 Z", "交会角 (°)");
+        foreach (var o in outcome.Observations)
+        {
+            table.Row(o.ConvergenceAngleDeg < 15.0, o.GcpId,
+                Fmt(o.Model.X, "0.0000"),
+                Fmt(o.Model.Y, "0.0000"),
+                Fmt(o.Model.Z, "0.0000"),
+                Fmt(o.ConvergenceAngleDeg, "0.00"));
+        }
+
+        table.Note = "模型坐标的比例尺是自由的（|b| = 1）。下一步「绝对定向」用这批点与地面坐标解七参数，才变成米制。";
+        return table;
+    }
+
     // ---------- 绝对定向 ----------
 
     private ResultTable AbsoluteResultTable(AbsoluteOrientationRun run)

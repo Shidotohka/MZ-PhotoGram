@@ -263,6 +263,18 @@ internal static class Program
             Pump(win);
         }
 
+        // 模型交会的界面端到端：铺相对定向那套布景 → 8 个控制点按真实刺点路径落点
+        // → 切到「模型交会」→ 求模型点 → 接着走绝对定向
+        if (args.Any(a => string.Equals(a, "--model-demo", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunRelativeDemo(win);
+            if (Environment.ExitCode == 0)
+            {
+                RunModelDemo(win);
+                Pump(win);
+            }
+        }
+
         // 绝对定向的界面端到端：铺相对定向那套布景 → 造 8 个控制点（2 个检查点）
         // → 切到「绝对定向」→ 按解算 → 看结果页
         if (args.Any(a => string.Equals(a, "--absolute-demo", StringComparison.OrdinalIgnoreCase)))
@@ -1541,64 +1553,8 @@ internal static class Program
         var left = project.Images.First(i => i.Id == pair.LeftImageId);
         var right = project.Images.First(i => i.Id == pair.RightImageId);
 
-        const double f = 152.72;
-        const double h = 3000.0;
-        const double depth = 2200.0;
-        var io = left.Interior!;
-        var pixelMm = io.PixelSizeMm;
-
-        // 与相对定向 demo 同一套布景：相机 3000 m、地面 800 m 附近、基线沿 Y 约 baseM
-        var halfY = left.Height / 2.0 * pixelMm / f * depth;
-        var halfX = left.Width / 2.0 * pixelMm / f * depth;
-        var baseM = 0.70 * 2.0 * halfY;
-        var overlapLowY = 2000 + baseM - halfY;
-        var overlapHighY = 2000 + halfY;
-
-        var ground = new List<GroundPointM>();
-        for (var k = 0; k < 8; k++)
-        {
-            var ix = k % 4;
-            var iy = k / 4;
-            ground.Add(new GroundPointM(
-                1000.0 + (ix - 1.5) * 0.45 * halfX,
-                overlapLowY + (0.30 + 0.40 * iy) * (overlapHighY - overlapLowY),
-                h - depth + 25.0 * Math.Sin(k * 1.3)));
-        }
-
-        var bound = 0;
-        for (var k = 0; k < ground.Count; k++)
-        {
-            var id = $"K{k + 1:00}";
-            var g = ground[k];
-            project.Gcps.Add(new Gcp
-            {
-                Id = id,
-                X = g.X,
-                Y = g.Y,
-                Z = g.Z,
-                Type = k >= 6 ? GcpType.CheckPoint : GcpType.Planimetric,
-            });
-
-            foreach (var image in new[] { left, right })
-            {
-                var mm = NativeAlgorithms.ProjectPoint(f, image.Exterior!, g);
-                if (mm is not { } m) continue;
-
-                var px = CoordinateConverter.ImagePlaneToPixel(m, io, image.Width, image.Height);
-                if (px.I < 0 || px.J < 0 || px.I >= image.Width || px.J >= image.Height) continue;
-
-                image.Points.Add(new ImagePoint
-                {
-                    Id = $"{id}@{image.Id}",
-                    ImageId = image.Id,
-                    PixelX = px.I,
-                    PixelY = px.J,
-                    BoundGcpId = id,
-                });
-                bound++;
-            }
-        }
-
+        // 与相对定向 demo 同一套布景；控制点走界面真正的那条刺点路径
+        var (ground, bound, baseM) = SeedGcpScene(win, left, right);
         Console.WriteLine($"  造了 {ground.Count} 个控制点（后 2 个检查点），两片共绑定 {bound} 个像点");
 
         if (!win.SelectModuleForTooling("绝对定向"))
@@ -1656,6 +1612,179 @@ internal static class Program
 
         CheckProcessInfo(win, "绝对定向");
     }
+    /// <summary>
+    /// 给模型交会 / 绝对定向的演示造控制点场景：与相对定向 demo 同一套布景，
+    /// 8 个控制点（后 2 个检查点），按已知外方位投影成两片上的刺点。
+    ///
+    /// <para>走 <see cref="MainWindow.BindGcpAt"/>——也就是界面点下去的那条路，
+    /// 不直接往模型里塞 ImagePoint，否则测的就不是界面了。</para>
+    /// </summary>
+    private static (List<GroundPointM> Ground, int Bound, double BaseM) SeedGcpScene(
+        MainWindow win, ImageItem left, ImageItem right, int count = 8, int checkFrom = 6)
+    {
+        const double f = 152.72;
+        const double h = 3000.0;
+        const double depth = 2200.0;
+
+        var io = left.Interior!;
+        var pixelMm = io.PixelSizeMm;
+        var halfY = left.Height / 2.0 * pixelMm / f * depth;
+        var halfX = left.Width / 2.0 * pixelMm / f * depth;
+        var baseM = 0.70 * 2.0 * halfY;
+        var overlapLowY = 2000 + baseM - halfY;
+        var overlapHighY = 2000 + halfY;
+
+        var ground = new List<GroundPointM>();
+        for (var k = 0; k < count; k++)
+        {
+            var ix = k % 4;
+            var iy = k / 4;
+            ground.Add(new GroundPointM(
+                1000.0 + (ix - 1.5) * 0.45 * halfX,
+                overlapLowY + (0.30 + 0.40 * iy) * (overlapHighY - overlapLowY),
+                h - depth + 25.0 * Math.Sin(k * 1.3)));
+        }
+
+        var bound = 0;
+        for (var k = 0; k < ground.Count; k++)
+        {
+            var id = $"K{k + 1:00}";
+            var g = ground[k];
+            win.CurrentProject.Gcps.Add(new Gcp
+            {
+                Id = id,
+                X = g.X,
+                Y = g.Y,
+                Z = g.Z,
+                Type = k >= checkFrom ? GcpType.CheckPoint : GcpType.Planimetric,
+            });
+
+            foreach (var image in new[] { left, right })
+            {
+                var mm = NativeAlgorithms.ProjectPoint(f, image.Exterior!, g);
+                if (mm is not { } m) continue;
+
+                var px = CoordinateConverter.ImagePlaneToPixel(m, io, image.Width, image.Height);
+                if (px.I < 0 || px.J < 0 || px.I >= image.Width || px.J >= image.Height) continue;
+
+                if (win.BindGcpAt(id, px.I, px.J, image)) bound++;
+            }
+        }
+
+
+        return (ground, bound, baseM);
+    }
+
+    /// <summary>
+    /// 模型交会的界面端到端。前置：<see cref="RunRelativeDemo"/> 已铺好两片与像对。
+    /// </summary>
+    private static void RunModelDemo(MainWindow win)
+    {
+        Console.WriteLine("\n模型交会界面端到端─────────────────────────────────────");
+
+        var project = win.CurrentProject;
+        var pair = project.Pairs.FirstOrDefault(p => p.Relative is not null);
+        if (pair is null)
+        {
+            Console.WriteLine("[FAIL] 没有解过相对定向的像对——先跑 --relative-demo 那套布景");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var left = project.Images.First(i => i.Id == pair.LeftImageId);
+        var right = project.Images.First(i => i.Id == pair.RightImageId);
+
+        var (ground, bound, baseM) = SeedGcpScene(win, left, right);
+        Console.WriteLine($"  造了 {ground.Count} 个控制点（后 2 个检查点），两片共绑定 {bound} 个像点");
+
+        if (!win.SelectModuleForTooling("模型交会"))
+        {
+            Console.WriteLine("[FAIL] 切不到「模型交会」模块");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Pump(win);
+        win.UpdateModelPanel();
+        Pump(win);
+
+        var hint = (win.FindName("ModelHint") as System.Windows.Controls.TextBlock)?.Text;
+        var pairText = (win.FindName("ModelPairText") as System.Windows.Controls.TextBlock)?.Text;
+        Console.WriteLine($"  面板：像对「{pairText}」");
+        Console.WriteLine($"        提示「{hint}」");
+
+        var outcome = win.SolveModelNow();
+        Pump(win);
+
+        if (!outcome.Success)
+        {
+            Console.WriteLine($"[FAIL] 模型交会没解出来：{outcome.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var worst = outcome.Observations.Min(o => o.ConvergenceAngleDeg);
+        Console.WriteLine($"  {outcome.Observations.Count} 个模型点，最差交会角 {worst:0.00}°");
+        Console.WriteLine(worst >= 15.0
+            ? "[PASS] 交会角都在 15° 以上"
+            : $"[FAIL] 有交会角小于 15° 的点（最差 {worst:0.00}°）");
+        if (worst < 15.0) Environment.ExitCode = 1;
+
+        var spanX = outcome.Observations.Max(o => o.Model.X) - outcome.Observations.Min(o => o.Model.X);
+        var spanY = outcome.Observations.Max(o => o.Model.Y) - outcome.Observations.Min(o => o.Model.Y);
+        var spanZ = outcome.Observations.Max(o => o.Model.Z) - outcome.Observations.Min(o => o.Model.Z);
+        Console.WriteLine($"  跨度 X {spanX:0.000}　Y {spanY:0.000}　Z {spanZ:0.000}（基线长 {baseM:0} m，比例尺未知）");
+        Console.WriteLine(spanY > 0.05 && spanY < 0.60
+            ? "[PASS] 模型跨度是基线长的量级（比例尺 |b| = 1）"
+            : $"[FAIL] 跨度 {spanY:0.000} 不像基线长量级");
+        if (!(spanY > 0.05 && spanY < 0.60)) Environment.ExitCode = 1;
+
+        var grid = win.FindName("ModelGrid") as System.Windows.Controls.DataGrid;
+        var rows = (grid?.ItemsSource as System.Collections.ICollection)?.Count ?? -1;
+        Console.WriteLine(rows == ground.Count
+            ? $"[PASS] 点表列出了 {rows} 个控制点"
+            : $"[FAIL] 点表 {rows} 行（应为 {ground.Count}）");
+        if (rows != ground.Count) Environment.ExitCode = 1;
+
+        var row0 = grid?.Items.Count > 0 ? grid.Items[0] : null;
+        var modelX = row0?.GetType().GetProperty("ModelX")?.GetValue(row0) as string;
+        Console.WriteLine(modelX is not null && modelX != "—"
+            ? $"[PASS] 点表里已有模型坐标（第一行 X = {modelX}）"
+            : "[FAIL] 点表里模型坐标还是空档");
+        if (modelX is null || modelX == "—") Environment.ExitCode = 1;
+
+        var panel = win.SnapshotResult();
+        var names = panel.Items.Select(i => i.Name).ToList();
+        var shown = panel.Title.Contains("模型交会") && names.Contains("最差交会角") &&
+                    panel.Rows.Count == ground.Count;
+        Console.WriteLine(shown
+            ? $"[PASS] 结果页显示了模型点与 {panel.Rows.Count} 行坐标"
+            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
+        if (!shown) Environment.ExitCode = 1;
+
+        // 同一条链接着走绝对定向：模型交会的产物就是它的输入
+        if (win.SelectModuleForTooling("绝对定向"))
+        {
+            Pump(win);
+            var run = win.SolveAbsoluteNow();
+            Pump(win);
+            Console.WriteLine(run.Success
+                ? $"[PASS] 接着做绝对定向：λ {run.Result!.Scale:0.000}（基线 {baseM:0} m）"
+                : $"[FAIL] 绝对定向没解出来：{run.Message}");
+            if (!run.Success) Environment.ExitCode = 1;
+        }
+
+        // 断言完了切回模型交会，并把底部页签停到「点表」：截图要展示模型坐标
+        if (win.SelectModuleForTooling("模型交会"))
+        {
+            win.UpdateModelPanel();
+            if (FindRadio(win, "点表") is { } tab) tab.IsChecked = true;
+            Pump(win);
+        }
+
+        CheckProcessInfo(win, "模型交会");
+    }
+
 
     private static void RunM3(MainWindow win, ImageItem image, string gcpFile)    {
         Console.WriteLine("\nM3 端到端───────────────────────────────────────────────");
@@ -2396,7 +2525,7 @@ internal static class Program
         if (dropped is not null) right.Points.Remove(dropped);
         var partial = AbsoluteOrientationTask.Prepare(project, pair);
         Check("单边刺点的控制点被明确跳过",
-            partial.Skipped.Any(s => s.Contains("只在左片")),
+            partial.Skipped.Any(s => s.Contains("只在")),
             partial.Skipped.FirstOrDefault(s => s.Contains("C1")) ?? "没给出说明");
 
         var partialRun = AbsoluteOrientationTask.Run(project, pair);

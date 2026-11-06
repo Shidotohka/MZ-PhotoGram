@@ -40,7 +40,7 @@ public partial class MainWindow : Window
         ["后方交会"] = ("选中控制点 → 在影像上刺点 → 解算外方位", WorkspaceMode.Pick),
         ["前方交会"] = ("同名像点 → 地面坐标", WorkspaceMode.Double),
         ["相对定向"] = ("同名像点 → 相对定向元素", WorkspaceMode.Double),
-        ["模型交会"] = ("同名像点 → 模型坐标", WorkspaceMode.Double),
+        ["模型交会"] = ("载入控制点 → 两片各刺一次 → 求模型坐标", WorkspaceMode.Double),
         ["绝对定向"] = ("模型点 + 控制点 → 七参数", WorkspaceMode.Double),
         // 光束平差的工作区形态还没定（该模块未实现），暂用单图；形态定了再改这里与 §4.2
         ["光束平差"] = ("全部影像同时平差 → 外方位 + 物点坐标", WorkspaceMode.Single),

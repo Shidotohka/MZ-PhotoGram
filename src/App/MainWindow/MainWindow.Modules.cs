@@ -104,19 +104,25 @@ public partial class MainWindow
         var isResection = name == "后方交会";
         var isIntersection = name == "前方交会";
         var isRelative = name == "相对定向";
+        var isModel = name == "模型交会";
         var isAbsolute = name == "绝对定向";
         InteriorPanel.Visibility = isInterior ? Visibility.Visible : Visibility.Collapsed;
         ResectionPanel.Visibility = isResection ? Visibility.Visible : Visibility.Collapsed;
         IntersectionPanel.Visibility = isIntersection ? Visibility.Visible : Visibility.Collapsed;
         RelativePanel.Visibility = isRelative ? Visibility.Visible : Visibility.Collapsed;
+        ModelPanel.Visibility = isModel ? Visibility.Visible : Visibility.Collapsed;
         AbsolutePanel.Visibility = isAbsolute ? Visibility.Visible : Visibility.Collapsed;
-        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection || isRelative || isAbsolute
+        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection || isRelative ||
+                                      isModel || isAbsolute
             ? Visibility.Collapsed
             : Visibility.Visible;
 
         // 绝对定向不解算像点、也不读相机检校文件：这两张卡在这个模块里只是噪音
-        PointInfoCard.Visibility = isAbsolute ? Visibility.Collapsed : Visibility.Visible;
-        InputCheckCard.Visibility = isAbsolute ? Visibility.Collapsed : Visibility.Visible;
+        // 模型交会与绝对定向都不解算像点、也不读相机检校文件：那两张卡在这里只是噪音，
+        // 还会把「载入控制点文件…」「求模型点」挤到折叠线以下。
+        var hideInspectorCards = isAbsolute || isModel;
+        PointInfoCard.Visibility = hideInspectorCards ? Visibility.Collapsed : Visibility.Visible;
+        InputCheckCard.Visibility = hideInspectorCards ? Visibility.Collapsed : Visibility.Visible;
 
         if (isInterior)
         {
@@ -133,16 +139,17 @@ public partial class MainWindow
         // 每个流程只显示自己那层的点：内定向看不到刺点，后方交会看不到框标，
         // 相对定向只看同名点（控制点刺点混进来会让人分不清在配什么）
         Workspace.SetLayer(isInterior ? ImageLayer.Fiducials
-            : isResection ? ImageLayer.ControlPoints
+            : isResection || isModel ? ImageLayer.ControlPoints
             : isRelative ? ImageLayer.TiePoints
             : ImageLayer.All);
 
-        // 刺点只在后方交会里生效；离开这个模块就退出刺点模式，免得在内定向里误点
-        if (!isResection) SetActiveGcp(null);
+        // 刺点只在后方交会与模型交会里生效；离开这两个模块就退出刺点模式，免得误点
+        if (!isResection && !isModel) SetActiveGcp(null);
 
         RefreshPointTable();
         if (isResection) UpdateResectionPanel();
         if (isRelative) UpdateRelativePanel();
+        if (isModel) UpdateModelPanel();
         if (isAbsolute) UpdateAbsolutePanel();
 
         // 离开前方交会就把配对清掉：留着两个临时像点却不在这个模块，谁也说不清它们是什么

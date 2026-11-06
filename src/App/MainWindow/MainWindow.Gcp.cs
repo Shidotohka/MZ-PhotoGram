@@ -176,13 +176,18 @@ public partial class MainWindow
 
         var isFiducial = _moduleName == "内定向";
         var isRelative = _moduleName == "相对定向";
+        var isModel = _moduleName == "模型交会";
 
         FiducialGrid.Visibility = isFiducial ? Visibility.Visible : Visibility.Collapsed;
-        GcpGrid.Visibility = isFiducial || isRelative ? Visibility.Collapsed : Visibility.Visible;
+        GcpGrid.Visibility = isFiducial || isRelative || isModel
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         TieGrid.Visibility = isRelative ? Visibility.Visible : Visibility.Collapsed;
+        ModelGrid.Visibility = isModel ? Visibility.Visible : Visibility.Collapsed;
 
         if (isFiducial) RefreshFiducialTable();
         else if (isRelative) RefreshTieTable();
+        else if (isModel) RefreshModelTable();
         else RefreshGcpTable();
     }
 
@@ -467,7 +472,7 @@ public partial class MainWindow
 
         image.Points.Remove(point);
         foreach (var view in Workspace.VisibleViews().ToList()) view.RefreshPoints();
-        RefreshGcpTable();
+        RefreshPointTable();
         UpdateStatusCounts();
 
         DiagSummary.Text = $"已删掉 {gcp.Id} 在本影像上的刺点";
@@ -490,7 +495,7 @@ public partial class MainWindow
 
         image.Points.RemoveAll(p => p.BoundGcpId is not null);
         foreach (var view in Workspace.VisibleViews().ToList()) view.RefreshPoints();
-        RefreshGcpTable();
+        RefreshPointTable();
         UpdateStatusCounts();
 
         DiagSummary.Text = $"已清空 {image.Id} 上的 {count} 个刺点（其它影像不受影响）";
