@@ -108,6 +108,16 @@ public partial class MainWindow
         RefreshTree();
     }
 
+    /// <summary>
+    /// 重画右栏「当前影像」卡。只给离屏渲染工具用：它直接改模型（例如塞内方位），
+    /// 不走载入与解算那两条会顺手刷新的路径，于是卡片会留着「未设置」。
+    /// </summary>
+    internal void RefreshInspector()
+    {
+        var image = Workspace.VisibleViews().FirstOrDefault(v => v.HasImage)?.Image;
+        if (image is not null) OnImageLoaded(null, image);
+    }
+
     private void OnImageLoaded(object? sender, ImageItem item)
     {
         var interior = item.Interior is { } io

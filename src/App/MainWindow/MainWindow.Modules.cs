@@ -104,13 +104,19 @@ public partial class MainWindow
         var isResection = name == "后方交会";
         var isIntersection = name == "前方交会";
         var isRelative = name == "相对定向";
+        var isAbsolute = name == "绝对定向";
         InteriorPanel.Visibility = isInterior ? Visibility.Visible : Visibility.Collapsed;
         ResectionPanel.Visibility = isResection ? Visibility.Visible : Visibility.Collapsed;
         IntersectionPanel.Visibility = isIntersection ? Visibility.Visible : Visibility.Collapsed;
         RelativePanel.Visibility = isRelative ? Visibility.Visible : Visibility.Collapsed;
-        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection || isRelative
+        AbsolutePanel.Visibility = isAbsolute ? Visibility.Visible : Visibility.Collapsed;
+        GenericTaskPanel.Visibility = isInterior || isResection || isIntersection || isRelative || isAbsolute
             ? Visibility.Collapsed
             : Visibility.Visible;
+
+        // 绝对定向不解算像点、也不读相机检校文件：这两张卡在这个模块里只是噪音
+        PointInfoCard.Visibility = isAbsolute ? Visibility.Collapsed : Visibility.Visible;
+        InputCheckCard.Visibility = isAbsolute ? Visibility.Collapsed : Visibility.Visible;
 
         if (isInterior)
         {
@@ -137,6 +143,7 @@ public partial class MainWindow
         RefreshPointTable();
         if (isResection) UpdateResectionPanel();
         if (isRelative) UpdateRelativePanel();
+        if (isAbsolute) UpdateAbsolutePanel();
 
         // 离开前方交会就把配对清掉：留着两个临时像点却不在这个模块，谁也说不清它们是什么
         if (isIntersection) UpdateIntersectionPanel();

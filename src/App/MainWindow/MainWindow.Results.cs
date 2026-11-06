@@ -377,6 +377,65 @@ public partial class MainWindow
         return table;
     }
 
+    // ---------- 绝对定向 ----------
+
+    private ResultTable AbsoluteResultTable(AbsoluteOrientationRun run)
+    {
+        var r = run.Result!;
+        var table = new ResultTable { Title = $"绝对定向 · {run.PairLabel}" };
+
+        table.Num("尺度", "λ", r.Scale, "0.000000", "", "模型单位 → 米");
+        table.Num("旋转", "φ", r.PhiDeg, "+0.0000;-0.0000", "°", "模型系 → 地面系");
+        table.Num("旋转", "ω", r.OmegaDeg, "+0.0000;-0.0000", "°");
+        table.Num("旋转", "κ", r.KappaDeg, "+0.0000;-0.0000", "°");
+        table.Num("平移", "X₀", r.X0, "0.000", "m");
+        table.Num("平移", "Y₀", r.Y0, "0.000", "m");
+        table.Num("平移", "Z₀", r.Z0, "0.000", "m");
+
+        var limit = 2.0 * r.Sigma0;
+        table.Num("控制点不符值", "rms", r.Rms, "0.0000", "m",
+            $"验收 2σ₀ = {Fmt(limit, "0.0000")} m", r.Rms > limit);
+        table.Num("单位权中误差", "σ₀", r.Sigma0, "0.0000", "m");
+        table.Num("最大不符值", "max", r.MaxAbsResidual, "0.0000", "m");
+        table.Add("参与 / 检查点", "—", $"{run.Used.Count} / {run.Checks.Count}", "个",
+            $"多余观测 {r.Redundancy}");
+
+        // 点位配置体检：σ3/σ1 小 = 控制点接近共面，高程全靠倾角外推
+        var flatness = r.Singular.Count >= 3 && r.Singular[0] > 0
+            ? r.Singular[2] / r.Singular[0]
+            : double.NaN;
+        table.Add("点位配置", "σ₃/σ₁", Fmt(flatness, "0.0E+0"), "",
+            double.IsNaN(flatness) ? ""
+                : flatness < 1e-3 ? "接近共面：高程弱" : "展得开",
+            !double.IsNaN(flatness) && flatness < 1e-3);
+
+        if (r.MirrorSuspected)
+        {
+            table.Add("数据镜像", "!", "疑似左右手系搞反", "", "检查地面坐标 X/Y 口径", true);
+        }
+
+        if (run.Checks.Count > 0)
+        {
+            table.Num("检查点最大偏差", "Δxy", run.CheckPlanimetricMax, "0.000", "m", "未参与解算");
+            table.Num("检查点最大偏差", "Δz", run.CheckHeightMax, "0.000", "m", "未参与解算");
+        }
+
+        table.Head("点号", "不符值 (m)", "v/σ₀", "状态");
+        foreach (var o in run.Used)
+        {
+            var ratio = r.Sigma0 > 0 ? o.ResidualLength / r.Sigma0 : double.NaN;
+            table.Row(ratio > 2.0, o.GcpId, Fmt(o.ResidualLength, "0.0000"), Fmt(ratio, "0.00"),
+                "参与");
+        }
+        foreach (var c in run.Checks)
+        {
+            table.Row(false, c.GcpId, "—", "—", "检查点");
+        }
+
+        table.Note = "结果不落盘：.pht 的 models[] 仍为空，重开工程要再解一次。";
+        return table;
+    }
+
     // ---------- 相对定向 ----------
 
     private ResultTable RelativeResultTable(RelativeRun run)

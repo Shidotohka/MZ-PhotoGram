@@ -263,6 +263,18 @@ internal static class Program
             Pump(win);
         }
 
+        // 绝对定向的界面端到端：铺相对定向那套布景 → 造 8 个控制点（2 个检查点）
+        // → 切到「绝对定向」→ 按解算 → 看结果页
+        if (args.Any(a => string.Equals(a, "--absolute-demo", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunRelativeDemo(win);
+            if (Environment.ExitCode == 0)
+            {
+                RunAbsoluteDemo(win);
+                Pump(win);
+            }
+        }
+
         // M3：载入真实控制点 → 按已知外方位反算像素位置刺点 → 解算后方交会 → 截图
         if (Get(args, "--gcp") is { } gcpFile)
         {
@@ -1366,6 +1378,10 @@ internal static class Program
         var items = views.Select(v => v.Image!).ToList();
         for (var k = 0; k < 2; k++) items[k].Interior = io;
 
+        // 内方位是直接写进模型的，绕过了「载入」与「解算」那两条会刷右栏的路径，
+        // 不补这一下，截图里「当前影像」会一直写着「内方位元素：未设置」。
+        win.RefreshInspector();
+
         // 工作区里的影像未必在工程里（--image / --loadsecond 是临时塞进去的）。
         // 同名点的成员是在工程里按影像找的，所以先把这两张登记进工程——
         // 用户是从影像库拖进来的，本来就在工程里，这里只是补上工具跳过的这一步。
@@ -1501,6 +1517,144 @@ internal static class Program
         Console.WriteLine($"[PASS] 结果写进了像对：{win.CurrentProject.Pairs.Count} 个像对");
 
         CheckProcessInfo(win, "相对定向");
+    }
+
+    /// <summary>
+    /// 绝对定向的界面端到端。前置：<see cref="RunRelativeDemo"/> 已经铺好两片与像对。
+    ///
+    /// <para>造 8 个控制点（后 2 个是检查点），按已知外方位投影成两片上的刺点，
+    /// 然后切到「绝对定向」按一次解算——走的是界面真正的按钮路径，不是另开一个口子。</para>
+    /// </summary>
+    private static void RunAbsoluteDemo(MainWindow win)
+    {
+        Console.WriteLine("\n绝对定向界面端到端─────────────────────────────────────");
+
+        var project = win.CurrentProject;
+        var pair = project.Pairs.FirstOrDefault(p => p.Relative is not null);
+        if (pair is null)
+        {
+            Console.WriteLine("[FAIL] 没有解过相对定向的像对——先跑 --relative-demo 那套布景");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var left = project.Images.First(i => i.Id == pair.LeftImageId);
+        var right = project.Images.First(i => i.Id == pair.RightImageId);
+
+        const double f = 152.72;
+        const double h = 3000.0;
+        const double depth = 2200.0;
+        var io = left.Interior!;
+        var pixelMm = io.PixelSizeMm;
+
+        // 与相对定向 demo 同一套布景：相机 3000 m、地面 800 m 附近、基线沿 Y 约 baseM
+        var halfY = left.Height / 2.0 * pixelMm / f * depth;
+        var halfX = left.Width / 2.0 * pixelMm / f * depth;
+        var baseM = 0.70 * 2.0 * halfY;
+        var overlapLowY = 2000 + baseM - halfY;
+        var overlapHighY = 2000 + halfY;
+
+        var ground = new List<GroundPointM>();
+        for (var k = 0; k < 8; k++)
+        {
+            var ix = k % 4;
+            var iy = k / 4;
+            ground.Add(new GroundPointM(
+                1000.0 + (ix - 1.5) * 0.45 * halfX,
+                overlapLowY + (0.30 + 0.40 * iy) * (overlapHighY - overlapLowY),
+                h - depth + 25.0 * Math.Sin(k * 1.3)));
+        }
+
+        var bound = 0;
+        for (var k = 0; k < ground.Count; k++)
+        {
+            var id = $"K{k + 1:00}";
+            var g = ground[k];
+            project.Gcps.Add(new Gcp
+            {
+                Id = id,
+                X = g.X,
+                Y = g.Y,
+                Z = g.Z,
+                Type = k >= 6 ? GcpType.CheckPoint : GcpType.Planimetric,
+            });
+
+            foreach (var image in new[] { left, right })
+            {
+                var mm = NativeAlgorithms.ProjectPoint(f, image.Exterior!, g);
+                if (mm is not { } m) continue;
+
+                var px = CoordinateConverter.ImagePlaneToPixel(m, io, image.Width, image.Height);
+                if (px.I < 0 || px.J < 0 || px.I >= image.Width || px.J >= image.Height) continue;
+
+                image.Points.Add(new ImagePoint
+                {
+                    Id = $"{id}@{image.Id}",
+                    ImageId = image.Id,
+                    PixelX = px.I,
+                    PixelY = px.J,
+                    BoundGcpId = id,
+                });
+                bound++;
+            }
+        }
+
+        Console.WriteLine($"  造了 {ground.Count} 个控制点（后 2 个检查点），两片共绑定 {bound} 个像点");
+
+        if (!win.SelectModuleForTooling("绝对定向"))
+        {
+            Console.WriteLine("[FAIL] 切不到「绝对定向」模块");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Pump(win);
+        win.UpdateAbsolutePanel();
+        Pump(win);
+
+        var pairText = (win.FindName("AbsolutePairText") as System.Windows.Controls.TextBlock)?.Text;
+        var hint = (win.FindName("AbsoluteHint") as System.Windows.Controls.TextBlock)?.Text;
+        Console.WriteLine($"  面板：像对「{pairText}」");
+        Console.WriteLine($"        提示「{hint}」");
+
+        var run = win.SolveAbsoluteNow();
+        Pump(win);
+
+        if (!run.Success)
+        {
+            Console.WriteLine($"[FAIL] 绝对定向没解出来：{run.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var r = run.Result!;
+        Console.WriteLine($"  λ {r.Scale:0.000000}　φ {r.PhiDeg:+0.0000;-0.0000}°　" +
+                          $"ω {r.OmegaDeg:+0.0000;-0.0000}°　κ {r.KappaDeg:+0.0000;-0.0000}°");
+        Console.WriteLine($"  rms {r.Rms:0.0000} m　σ₀ {r.Sigma0:0.0000} m　" +
+                          $"控点 {run.Used.Count}　检查点 {run.Checks.Count}　多余观测 {r.Redundancy}");
+
+        // 模型坐标以基线长为单位，所以 λ 必须等于这条基线的长度
+        var deviation = Math.Abs(r.Scale - baseM) / baseM;
+        Console.WriteLine(deviation < 0.05
+            ? $"[PASS] λ = 基线长度　基线 {baseM:0.0} m，λ {r.Scale:0.000} m（差 {100 * (r.Scale - baseM) / baseM:+0.0;-0.0}%）"
+            : $"[FAIL] λ {r.Scale:0.000} m 与基线 {baseM:0.0} m 差 {100 * deviation:0.0}%");
+        if (deviation >= 0.05) Environment.ExitCode = 1;
+
+        var panel = win.SnapshotResult();
+        var names = panel.Items.Select(i => i.Name).ToList();
+        var shown = panel.Title.Contains("绝对定向") && names.Contains("尺度") &&
+                    panel.Rows.Count == ground.Count;
+        Console.WriteLine(shown
+            ? $"[PASS] 结果页显示了七参数与 {panel.Rows.Count} 行不符值"
+            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
+        if (!shown) Environment.ExitCode = 1;
+
+        var header = panel.Headers.FirstOrDefault();
+        Console.WriteLine(header == "点号"
+            ? "[PASS] 不符值表的列头是点号"
+            : $"[FAIL] 不符值表列头是「{header}」");
+
+        CheckProcessInfo(win, "绝对定向");
     }
 
     private static void RunM3(MainWindow win, ImageItem image, string gcpFile)    {

@@ -34,6 +34,10 @@ public partial class MainWindow
         };
 
         DataTree.ItemsSource = roots;
+
+        // 树与底部计数是同一件事的两种呈现，一起刷：否则导入控制点后
+        // 树上写着 8、状态栏还留着 0，看的人不知道该信哪个。
+        UpdateStatusCounts();
     }
 
     private TreeNode BuildImageGroup()

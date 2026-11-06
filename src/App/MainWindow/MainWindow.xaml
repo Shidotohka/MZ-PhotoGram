@@ -335,7 +335,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="{StaticResource Panel2Brush}"
+                            <Border x:Name="PointInfoCard" Background="{StaticResource Panel2Brush}"
                                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                                     CornerRadius="7" Padding="11" Margin="0,0,0,9">
                                 <StackPanel>
@@ -347,7 +347,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="{StaticResource Panel2Brush}"
+                            <Border x:Name="InputCheckCard" Background="{StaticResource Panel2Brush}"
                                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                                     CornerRadius="7" Padding="11">
                                 <StackPanel>
@@ -537,6 +537,26 @@
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
 
                                         <Button Content="清空本像对的同名点" Click="ClearRelativeTies_Click"
+                                                Style="{StaticResource ToolBtn}"
+                                                HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
+                                    </StackPanel>
+
+                                    <StackPanel x:Name="AbsolutePanel" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock x:Name="AbsoluteHint" FontSize="11"
+                                                   Foreground="{StaticResource DimBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <Border Background="{StaticResource PanelBrush}"
+                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
+                                            <TextBlock x:Name="AbsolutePairText" Text="像对 —"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       Foreground="{StaticResource DimBrush}"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <Button x:Name="AbsoluteSolveButton" Content="解算绝对定向"
+                                                Click="SolveAbsolute_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
                                     </StackPanel>
