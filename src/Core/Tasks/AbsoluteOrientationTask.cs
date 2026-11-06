@@ -56,6 +56,15 @@ public sealed class AbsoluteOrientationPreparation
     /// <summary>模型坐标是自由比例尺（相对定向产物），界面上必须标出来。</summary>
     public bool IsModelCoordinates { get; init; } = true;
 
+    /// <summary>
+    /// 地面坐标的轴序，由模型交会顺手判出（三点叉乘，与后方交会同一个判据）。
+    /// <see cref="GroundAxisOrder.NorthEast"/> 表示文件是左手系，解算前必须换轴。
+    /// </summary>
+    public GroundAxisOrder GroundOrder { get; init; } = GroundAxisOrder.EastNorth;
+
+    /// <summary>判手性的证据，供界面/报告引用；控制点不足 3 个时为空。</summary>
+    public GroundOrderEvidence? Evidence { get; init; }
+
     public int Count => Observations.Count;
 
     public bool Ready => Failure == AbsoluteOrientationFailure.None;
@@ -91,6 +100,12 @@ public sealed class AbsoluteOrientationRun
 
     public string PairLabel { get; init; } = string.Empty;
 
+    /// <summary>
+    /// 解算时采用的地面轴序。<see cref="GroundAxisOrder.NorthEast"/> 表示文件是左手系、
+    /// 解算前已把 X/Y 换回东-北；<see cref="AbsoluteOrientationObservation.Ground"/> 里仍是文件原值。
+    /// </summary>
+    public GroundAxisOrder GroundOrder { get; init; } = GroundAxisOrder.EastNorth;
+
     public bool Success => Failure == AbsoluteOrientationFailure.None;
 
     /// <summary>检查点的最大平面（X/Y）偏差；没有检查点时为 NaN。</summary>
@@ -102,8 +117,9 @@ public sealed class AbsoluteOrientationRun
             foreach (var c in Checks)
             {
                 if (c.Transformed is not { } t) continue;
-                var d = Math.Sqrt((t.X - c.Ground.X) * (t.X - c.Ground.X) +
-                                  (t.Y - c.Ground.Y) * (t.Y - c.Ground.Y));
+                // 变换结果在数学系，文件里的地面坐标要先换成同一口径再比
+                var g = GroundAxes.ToMathFrame(c.Ground, GroundOrder);
+                var d = Math.Sqrt((t.X - g.X) * (t.X - g.X) + (t.Y - g.Y) * (t.Y - g.Y));
                 if (double.IsNaN(worst) || d > worst) worst = d;
             }
             return worst;
@@ -119,6 +135,7 @@ public sealed class AbsoluteOrientationRun
             foreach (var c in Checks)
             {
                 if (c.Transformed is not { } t) continue;
+                // 换轴只动 X/Y，Z 不变，所以这里不用换
                 var d = Math.Abs(t.Z - c.Ground.Z);
                 if (double.IsNaN(worst) || d > worst) worst = d;
             }
@@ -184,6 +201,8 @@ public static class AbsoluteOrientationTask
             },
             PairLabel = model.PairLabel,
             IsModelCoordinates = model.IsModelCoordinates,
+            GroundOrder = model.GroundOrder,
+            Evidence = model.Evidence,
         };
     }
 
@@ -209,9 +228,15 @@ public static class AbsoluteOrientationTask
             .Where(o => o.Type == GcpType.CheckPoint)
             .ToList();
 
+        // 地面坐标先换到数学系（X 东、Y 北）再解。左手系文件在这一步换掉，与后方交会同一条规矩；
+        // 判断已经由模型交会的三点叉乘给出，所以这里不试解、不比较残差。
+        var groundFrame = used
+            .Select(o => GroundAxes.ToMathFrame(o.Ground, prep.GroundOrder))
+            .ToList();
+
         var solution = NativeAlgorithms.SolveAbsoluteOrientation(
             used.Select(o => o.Model).ToList(),
-            used.Select(o => o.Ground).ToList());
+            groundFrame);
 
         if (!solution.Success)
         {
@@ -221,10 +246,17 @@ public static class AbsoluteOrientationTask
                 Message = solution.Message,
                 Skipped = prep.Skipped,
                 PairLabel = prep.PairLabel,
+                GroundOrder = prep.GroundOrder,
             };
         }
 
         var warnings = new List<string>();
+
+        if (prep.GroundOrder == GroundAxisOrder.NorthEast)
+        {
+            warnings.Add("地面文件是左手系（X 北、Y 东）：解算前已把 X/Y 换回东-北（右手系），" +
+                         "结果里的地面坐标按东-北口径。");
+        }
 
         var usedWithResiduals = new List<AbsoluteOrientationObservation>(used.Count);
         for (var k = 0; k < used.Count; k++)
@@ -241,8 +273,11 @@ public static class AbsoluteOrientationTask
 
         if (solution.MirrorSuspected)
         {
-            warnings.Add("控制点数据像是镜像的（左右手系搞反）：最优的真旋转也贴不上，" +
-                         "残差大且呈系统性。检查地面坐标的 X/Y 是否与工程口径一致。");
+            warnings.Add(prep.Evidence is { Decided: true }
+                ? "七参数仍怀疑镜像：轴序已经按三点叉乘核过并换过轴，所以更可能是控制点号与地面坐标配错，" +
+                  "或某个点的地面坐标有粗差。"
+                : "控制点数据像是镜像的（左右手系搞反）：最优的真旋转也贴不上，" +
+                  "残差大且呈系统性。检查地面坐标的 X/Y 是否与工程口径一致。");
         }
 
         var sigma = solution.Sigma0;
@@ -274,6 +309,7 @@ public static class AbsoluteOrientationTask
             Skipped = prep.Skipped,
             Warnings = warnings,
             PairLabel = prep.PairLabel,
+            GroundOrder = prep.GroundOrder,
         };
     }
 

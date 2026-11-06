@@ -442,7 +442,7 @@ public partial class MainWindow
 
         if (r.MirrorSuspected)
         {
-            table.Add("数据镜像", "!", "疑似左右手系搞反", "", "检查地面坐标 X/Y 口径", true);
+            table.Add("数据镜像", "!", "疑似左右手系搞反", "", "轴序已核过：查点号配对与粗差", true);
         }
 
         if (run.Checks.Count > 0)

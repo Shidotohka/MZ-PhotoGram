@@ -60,6 +60,15 @@ public sealed class ModelIntersectionOutcome
     /// <summary>模型坐标是自由比例尺（$|\mathbf b| = 1$），界面必须标出来。</summary>
     public bool IsModelCoordinates { get; init; } = true;
 
+    /// <summary>
+    /// 地面坐标的轴序。模型坐标由像点交会得来、与地面无关，所以这一步只是<b>顺手判出</b>
+    /// 文件口径（判据与后方交会是同一个三点叉乘），好让绝对定向在用地面坐标之前换轴。
+    /// </summary>
+    public GroundAxisOrder GroundOrder { get; init; } = GroundAxisOrder.EastNorth;
+
+    /// <summary>判手性的证据：用的哪三点、两侧正弦、投票数。控制点不足 3 个时判不出。</summary>
+    public GroundOrderEvidence? Evidence { get; init; }
+
     public bool Success => Failure == ModelIntersectionFailure.None;
 
     /// <summary>能参与绝对定向的点数（检查点不算）。</summary>
@@ -201,6 +210,26 @@ public static class ModelIntersectionTask
                          "深度方向不可靠——多半是基线太短或点离像主点太近。");
         }
 
+        // 判地面轴序（手性）：直接调后方交会那个三点叉乘，不另写一份，也不"试解一次看哪个残差小"。
+        // 它要的输入是「像点 + 地面坐标」，而这里每个点本来就有左片像点（右片像点此刻还用不上，
+        // 两片的像平面口径相同），所以观测形状和后方交会完全一样，一个方法两边通用。
+        // 轴序是地面文件的属性，跟模型坐标无关：判不出来照样出结果，只提示下游小心。
+        var probes = observations
+            .Select(o => new ResectionObservation(
+                o.GcpId, o.LeftMm.X, o.LeftMm.Y, o.Ground.X, o.Ground.Y, o.Ground.Z))
+            .ToList();
+        var evidence = NativeAlgorithms.DetectGroundOrder(probes);
+        var order = evidence.Decided ? evidence.Order : GroundAxisOrder.EastNorth;
+
+        if (!evidence.Decided && observations.Count >= 3)
+        {
+            warnings.Add(evidence.Message + "绝对定向会按东-北口径解算，残差异常大时先回来查这一点。");
+        }
+        else if (order == GroundAxisOrder.NorthEast)
+        {
+            warnings.Add("地面文件是左手系（X 北、Y 东）：绝对定向会先把 X/Y 换回东-北再解。模型坐标不受影响。");
+        }
+
         return new ModelIntersectionOutcome
         {
             Failure = ModelIntersectionFailure.None,
@@ -209,6 +238,8 @@ public static class ModelIntersectionTask
             Warnings = warnings,
             PairLabel = label,
             IsModelCoordinates = geometry.IsModelCoordinates,
+            GroundOrder = order,
+            Evidence = evidence,
         };
     }
 

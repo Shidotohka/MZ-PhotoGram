@@ -2498,6 +2498,42 @@ internal static class Program
         Check("多余观测数 = 3n − 7", run.Result.Redundancy == 3 * 6 - 7,
             $"r = {run.Result.Redundancy}");
 
+        // ---- 3b 地面文件写成左手系（X/Y 互换）----
+        // 判据不是"再解一次比残差"，而是模型交会里直接调的后方交会那个三点叉乘。
+        // 所以这项要验两件事：判得出来（NorthEast），并且换回轴后解出的是同一个七参数。
+        var cleanScale = run.Result.Scale;
+        var cleanRotation = run.Result.Rotation.ToArray();
+        foreach (var gcp in project.Gcps) (gcp.X, gcp.Y) = (gcp.Y, gcp.X);
+
+        var swappedPrep = AbsoluteOrientationTask.Prepare(project, pair);
+        var swappedEvidence = swappedPrep.Evidence;
+        Check("地面 X/Y 写反时判出左手系",
+            swappedEvidence is { Decided: true } se && se.Order == GroundAxisOrder.NorthEast,
+            swappedEvidence is { } e2
+                ? $"{e2.Order}　三点 {e2.Triple}　sin像 {e2.SinImage:+0.000;-0.000} / " +
+                  $"sin地 {e2.SinGround:+0.000;-0.000}　一致 {e2.Agreeing}/{e2.Total}"
+                : "判据没给出证据");
+
+        var swappedRun = AbsoluteOrientationTask.Run(project, pair);
+        var rotationDelta = 0.0;
+        if (swappedRun.Success)
+        {
+            var r2 = swappedRun.Result!.Rotation;
+            for (var k = 0; k < cleanRotation.Length && k < r2.Count; k++)
+            {
+                rotationDelta = Math.Max(rotationDelta, Math.Abs(cleanRotation[k] - r2[k]));
+            }
+        }
+        Check("换回东-北后解出同一个七参数（不是重解碰运气）",
+            swappedRun.Success && swappedRun.GroundOrder == GroundAxisOrder.NorthEast &&
+            Math.Abs(swappedRun.Result!.Scale - cleanScale) < 1e-9 && rotationDelta < 1e-9,
+            swappedRun.Success
+                ? $"λ {cleanScale:0.000000} → {swappedRun.Result!.Scale:0.000000}　" +
+                  $"R 最大差 {rotationDelta:0.0E+0}"
+                : $"{swappedRun.Failure}：{swappedRun.Message}");
+
+        foreach (var gcp in project.Gcps) (gcp.X, gcp.Y) = (gcp.Y, gcp.X);
+
         // ---- 4 刺点带 1 像元误差 ----
         // 注意：整批加同一个偏移（比如都 +1）会被 λ 与平移吸收掉，σ0 几乎不动，
         // 那种"噪声测试"是假的。正负交替才留得下残差。
