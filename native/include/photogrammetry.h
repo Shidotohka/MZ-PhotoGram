@@ -533,6 +533,76 @@ typedef struct pgm_epipolar_rectify_output
 PGM_API int32_t pgm_epipolar_rectify(const pgm_epipolar_rectify_input*  in,
                                      const pgm_epipolar_rectify_output* out);
 
+/* ------------------------------------------------------------ 绝对定向 */
+
+/*
+ * 七参数相似变换的输入（摄影测量叫绝对定向，大地测量叫 Helmert，统计叫 Procrustes）。
+ *
+ * 模型方程：
+ *     g = λ R m + t
+ *
+ * m 是模型坐标（相对定向 + 前方交会的结果，比例尺以基线长为单位），
+ * g 是同一批控制点的地面坐标（野外实测），一一对应。
+ * 两者的长度单位不必相同——λ 会把单位差一起吸收。
+ *
+ * count 至少为 3。控制点近共线时，绕该直线的旋转不可测，返回 PGM_ERR_DEGENERATE。
+ * 控制点共面**可以**解（野外常见），但高程方向全靠倾角外推，看 out->singular。
+ */
+typedef struct pgm_absolute_orientation_input
+{
+    int32_t       count;
+    const double* model_x;
+    const double* model_y;
+    const double* model_z;
+    const double* ground_x;
+    const double* ground_y;
+    const double* ground_z;
+} pgm_absolute_orientation_input;
+
+/*
+ * 绝对定向的输出。R 与 λ、t 一起满足 g = λ R m + t。
+ */
+typedef struct pgm_absolute_orientation_output
+{
+    double scale;                 /* λ > 0 */
+    double rotation[9];           /* 行主序，模型系 → 地面系，det = +1 */
+    double translation[3];        /* t = (X0, Y0, Z0)，与地面坐标同单位 */
+
+    /* 把 rotation 按教材形式 R = Rκ·Rω·Rφ 分解得到的三个角。
+       注意：这里 R 是「模型 → 地面」，与后方交会那个「地面 → 像空间」的 R
+       互为转置，两处的角不是同一组量。角只用于显示与复算，不参与解算。 */
+    double phi_rad, omega_rad, kappa_rad;
+    double phi_deg, omega_deg, kappa_deg;
+
+    int32_t used_count;
+    int32_t redundancy;           /* 3n - 7 */
+
+    double sigma0;                /* 单位权中误差，与地面坐标同单位 */
+    double rms;                   /* 控制点不符值 RMS = sqrt(Σ|v|²/n)，同单位 */
+    double max_abs_residual;
+
+    /* H = Σ m' g'^T 的奇异值，降序。
+       σ2/σ1 ≈ 0 ⇒ 控制点共线（解不出来）；σ3/σ1 ≈ 0 ⇒ 控制点共面（能解，高程弱）。 */
+    double singular[3];
+    double condition;             /* σ1/σ2；共线时给 1e300 */
+
+    /* 1 = 控制点数据是镜像的（左右手系搞反）。此时最好的「真旋转」也贴不上，
+       症状是残差大且系统性——不是算法错，是坐标轴换了。 */
+    int32_t mirror_suspected;
+
+    /* 逐点不符值 v = g' - λR m'。residual_xyz 长度 3*count（X,Y,Z 交错），
+       residual_length 长度 count。调用方预分配；不需要时置 NULL。 */
+    double* residual_xyz;
+    double* residual_length;
+} pgm_absolute_orientation_output;
+
+/*
+ * 七参数相似变换：闭合解（Procrustes），全局最优、无迭代。
+ * 成功返回 PGM_OK。PGM_ERR_DEGENERATE 时 out 只保证被清零。
+ */
+PGM_API int32_t pgm_absolute_orientation(const pgm_absolute_orientation_input* in,
+                                         pgm_absolute_orientation_output*      out);
+
 /* 库版本字符串，形如 "1.0.0"。 */
 PGM_API const char* pgm_version(void);
 

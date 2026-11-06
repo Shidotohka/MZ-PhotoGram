@@ -52,6 +52,12 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => string.Equals(a, "--absolute", StringComparison.OrdinalIgnoreCase)))
+        {
+            AbsoluteCheck();
+            return;
+        }
+
         if (args.Any(a => string.Equals(a, "--relative", StringComparison.OrdinalIgnoreCase)))
         {
             RelativeCheck();
@@ -2031,6 +2037,247 @@ internal static class Program
 
         Console.WriteLine(failures == 0 ? "MATCH-RELATIVE PASS" : $"MATCH-RELATIVE FAIL（{failures} 项）");
         if (failures != 0) Environment.ExitCode = 1;
+    }
+
+    /// <summary>
+    /// 绝对定向端到端自检（M7）：合成像对 → 相对定向 → 控制点交会 → 七参数 → 地面坐标。
+    ///
+    /// <para>为什么全用合成数据：真实工程里控制点在**同一个像对的两片上**凑不到 3 个
+    /// （`01-155` 一个都没刺），而绝对定向恰恰要求每点两片都有像点。合成数据能把
+    /// 「已知真值 → 反解 → 比真值」这条路走完整，真数据等补刺点后再验。</para>
+    ///
+    /// <para>容差按刺点精度定：像元 0.04503 mm、航高 2000 m，地面采样间隔约 0.59 m/像元，
+    /// 所以「回到地面」的偏差在 1 m 量级是正常的，不是算法误差。</para>
+    /// </summary>
+    private static void AbsoluteCheck()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        const double f = 152.72;
+        const double pixelMm = 0.04503;
+        const int width = 5120;
+        const int height = 5120;
+
+        var io = new InteriorOrientation { FocalLength = f, PixelSizeMm = pixelMm };
+
+        // 两片：航高 2000 m，基线约 1000 m。模型坐标以基线长为单位，所以 λ 应等于基线长度。
+        var leftPose = new ExteriorOrientation { Xs = 0, Ys = 0, Zs = 2000, Phi = 0.6, Omega = -0.4, Kappa = 1.2 };
+        var rightPose = new ExteriorOrientation { Xs = 1000, Ys = 30, Zs = 1980, Phi = 0.5, Omega = -0.35, Kappa = 1.6 };
+        var baseline = Math.Sqrt(1000.0 * 1000.0 + 30.0 * 30.0 + 20.0 * 20.0);
+
+        var left = new ImageItem { Id = "SIM-L", Width = width, Height = height, Interior = io };
+        var right = new ImageItem { Id = "SIM-R", Width = width, Height = height, Interior = io };
+
+        var project = new Project();
+        project.Images.Add(left);
+        project.Images.Add(right);
+
+        Console.WriteLine("绝对定向自检（M7 端到端：相对定向 → 控制点交会 → 七参数）");
+        Console.WriteLine(new string('=', 78));
+        Console.WriteLine($"合成像对　航高 2000 m　基线 {baseline:0.0} m　地面采样间隔约 {2000.0 / f * pixelMm:0.000} m/像元");
+        Console.WriteLine();
+
+        // ---- 1 同名点（只给相对定向用，不参与绝对定向）----
+        var tieLeft = new List<ImagePointMm>();
+        var tieRight = new List<ImagePointMm>();
+        for (var k = 0; k < 12; k++)
+        {
+            var tie = new GroundPointM(120.0 + 55.0 * (k % 4), 120.0 + 60.0 * (k / 4), 18.0 * (k % 3));
+            var pl = NativeAlgorithms.ProjectPoint(f, leftPose, tie);
+            var pr = NativeAlgorithms.ProjectPoint(f, rightPose, tie);
+            if (pl is null || pr is null)
+            {
+                Check("同名点全部落在两片像幅内", false, $"第 {k} 个点投影失败");
+                Environment.ExitCode = 1;
+                return;
+            }
+            tieLeft.Add(pl.Value);
+            tieRight.Add(pr.Value);
+        }
+
+        var ro = NativeAlgorithms.SolveRelativeOrientation(tieLeft, tieRight, f);
+        Check("合成像对能解出相对定向", ro.Success,
+            ro.Success
+                ? $"{ro.Iterations} 轮　{ro.UsedCount}/{tieLeft.Count} 参与　q_rms {ro.QRmsMm:0.0000} mm"
+                : ro.Message);
+
+        if (!ro.Success)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var relative = new RelativeOrientation
+        {
+            ReferenceImageId = left.Id,
+            Bx = ro.Bx,
+            By = ro.By,
+            Bz = ro.Bz,
+            Phi2 = ro.PhiDeg,
+            Omega2 = ro.OmegaDeg,
+            Kappa2 = ro.KappaDeg,
+            Gauge = ro.Gauge,
+            FocalLength = f,
+            Sigma0Mm = ro.Sigma0Mm,
+            RmsQ = ro.QRmsMm,
+        };
+
+        var pair = new StereoPair
+        {
+            Id = "SIM-P1",
+            LeftImageId = left.Id,
+            RightImageId = right.Id,
+            Relative = relative,
+        };
+        project.Pairs.Add(pair);
+
+        // ---- 2 控制点：8 个，其中 2 个是检查点 ----
+        var controlGround = new[]
+        {
+            new GroundPointM(100, 100, 5),
+            new GroundPointM(500, 120, 12),
+            new GroundPointM(120, 520, 30),
+            new GroundPointM(480, 500, 8),
+            new GroundPointM(300, 300, 45),
+            new GroundPointM(200, 420, 70),
+            new GroundPointM(420, 200, 20),
+            new GroundPointM(350, 350, 95),
+        };
+        var checkIds = new[] { "C7", "C8" };
+
+        for (var k = 0; k < controlGround.Length; k++)
+        {
+            var id = $"C{k + 1}";
+            var g = controlGround[k];
+            project.Gcps.Add(new Gcp
+            {
+                Id = id,
+                X = g.X,
+                Y = g.Y,
+                Z = g.Z,
+                Type = checkIds.Contains(id) ? GcpType.CheckPoint : GcpType.Planimetric,
+            });
+
+            Bind(left, leftPose, id, g);
+            Bind(right, rightPose, id, g);
+        }
+
+        // ---- 3 真值已知的情况下解七参数 ----
+        var prep = AbsoluteOrientationTask.Prepare(project, pair);
+        Check("准备阶段凑齐观测", prep.Ready,
+            prep.Ready
+                ? $"{prep.Count} 个控制点（含 2 个检查点），像对 {prep.PairLabel}"
+                : $"{prep.Failure}：{prep.Message}");
+        Check("模型坐标被标成自由比例尺", prep.IsModelCoordinates, $"IsModelCoordinates = {prep.IsModelCoordinates}");
+
+        var run = AbsoluteOrientationTask.Run(project, pair);
+        Check("只靠相对定向就能解出七参数", run.Success,
+            run.Success ? $"λ = {run.Result!.Scale:0.000000}" : $"{run.Failure}：{run.Message}");
+
+        if (!run.Success)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Check("尺度 = 基线长度（模型以基线长为单位）",
+            Math.Abs(run.Result!.Scale - baseline) < 2.0,
+            $"λ = {run.Result.Scale:0.0000}　真值 {baseline:0.0000}（差 {run.Result.Scale - baseline:+0.0000;-0.0000}）");
+
+        Check("控制点与检查点分开", run.Used.Count == 6 && run.Checks.Count == 2,
+            $"参与 {run.Used.Count}，检查 {run.Checks.Count}");
+
+        var worst = 0.0;
+        foreach (var o in run.Used)
+        {
+            var t = run.Result.Transform(o.Model);
+            var d = Math.Sqrt(Math.Pow(t.X - o.Ground.X, 2) + Math.Pow(t.Y - o.Ground.Y, 2) +
+                              Math.Pow(t.Z - o.Ground.Z, 2));
+            if (d > worst) worst = d;
+        }
+
+        Check("控制点算回地面坐标（像元量化约 0.3 m）", worst < 1.5,
+            $"最大偏差 {worst:0.000} m　rms {run.Result.Rms:0.000} m　σ0 {run.Result.Sigma0:0.000} m");
+
+        var worstCheck = run.CheckHeightMax;
+        var worstPlan = run.CheckPlanimetricMax;
+        Check("检查点不参与解算，但预测得对",
+            !double.IsNaN(worstCheck) && worstPlan < 1.5 && worstCheck < 1.5,
+            $"平面 {worstPlan:0.000} m　高程 {worstCheck:0.000} m");
+
+        Check("多余观测数 = 3n − 7", run.Result.Redundancy == 3 * 6 - 7,
+            $"r = {run.Result.Redundancy}");
+
+        // ---- 4 刺点带 1 像元误差 ----
+        // 注意：整批加同一个偏移（比如都 +1）会被 λ 与平移吸收掉，σ0 几乎不动，
+        // 那种"噪声测试"是假的。正负交替才留得下残差。
+        var noiseIndex = 0;
+        foreach (var gcp in project.Gcps.ToList())
+        {
+            var p = right.FindGcpPoint(gcp.Id);
+            if (p is not null) p.PixelX += (noiseIndex++ % 2 == 0) ? 1 : -1;
+        }
+
+        var noisy = AbsoluteOrientationTask.Run(project, pair);
+        Check("刺点带 1 像元误差仍能解", noisy.Success,
+            noisy.Success ? $"σ0 = {noisy.Result!.Sigma0:0.000} m" : noisy.Message);
+        if (noisy.Success)
+        {
+            // 1 像元 ≈ 0.59 m 地面。交替误差吸收不掉，σ0 必须明显大于干净时的量化残差。
+            var clean = run.Result!.Sigma0;
+            Check("σ0 随刺点误差上升（没有被整体平移吸收）",
+                noisy.Result!.Sigma0 > 1.5 * clean && noisy.Result.Sigma0 < 2.0,
+                $"干净 {clean:0.000} m → 加减 1 像元 {noisy.Result.Sigma0:0.000} m");
+        }
+
+        // ---- 5 单边刺点：应被跳过，而不是硬算 ----
+        var dropped = right.FindGcpPoint("C1");
+        if (dropped is not null) right.Points.Remove(dropped);
+        var partial = AbsoluteOrientationTask.Prepare(project, pair);
+        Check("单边刺点的控制点被明确跳过",
+            partial.Skipped.Any(s => s.Contains("只在左片")),
+            partial.Skipped.FirstOrDefault(s => s.Contains("C1")) ?? "没给出说明");
+
+        var partialRun = AbsoluteOrientationTask.Run(project, pair);
+        Check("少一个控点仍能解（5 个参与）", partialRun.Success && partialRun.Used.Count == 5,
+            partialRun.Success ? $"参与 {partialRun.Used.Count}" : $"{partialRun.Failure}：{partialRun.Message}");
+
+        // ---- 6 没有相对定向就别解 ----
+        var noRelative = AbsoluteOrientationTask.Run(project, new StereoPair
+        {
+            Id = "SIM-P2",
+            LeftImageId = left.Id,
+            RightImageId = right.Id,
+        });
+        Check("没有相对定向时明确拒绝", noRelative.Failure == AbsoluteOrientationFailure.NoRelative,
+            $"{noRelative.Failure}：{noRelative.Message}");
+
+        Console.WriteLine();
+        Console.WriteLine(failures == 0 ? "ABSOLUTE PASS" : $"ABSOLUTE FAIL（{failures} 项）");
+        if (failures != 0) Environment.ExitCode = 1;
+
+        // 本地函数：把一个地面点投影到某片上，做成"刺点"
+        void Bind(ImageItem image, ExteriorOrientation pose, string gcpId, GroundPointM ground)
+        {
+            var mm = NativeAlgorithms.ProjectPoint(f, pose, ground);
+            if (mm is null) return;
+            var pixel = CoordinateConverter.ImagePlaneToPixel(mm.Value, io, image.Width, image.Height);
+            image.Points.Add(new ImagePoint
+            {
+                Id = $"{gcpId}@{image.Id}",
+                ImageId = image.Id,
+                PixelX = pixel.I,
+                PixelY = pixel.J,
+                BoundGcpId = gcpId,
+            });
+        }
     }
 
     private static void RelativeCheck()

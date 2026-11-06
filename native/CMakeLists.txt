@@ -25,6 +25,7 @@ add_library(photogrammetry SHARED
     src/resection.cpp
     src/forward_intersection.cpp
     src/relative_orientation.cpp
+    src/absolute_orientation.cpp
     src/epipolar.cpp
 )
 
@@ -47,6 +48,9 @@ target_link_libraries(pgm_relative_orientation_test PRIVATE photogrammetry)
 
 add_executable(pgm_epipolar_test tests/test_epipolar.cpp)
 target_link_libraries(pgm_epipolar_test PRIVATE photogrammetry)
+
+add_executable(pgm_absolute_orientation_test tests/test_absolute_orientation.cpp)
+target_link_libraries(pgm_absolute_orientation_test PRIVATE photogrammetry)
 
 enable_testing()
 
@@ -92,4 +96,5 @@ add_test(NAME interior_orientation
 add_test(NAME resection COMMAND pgm_resection_test)
 add_test(NAME forward_intersection COMMAND pgm_intersection_test)
 add_test(NAME relative_orientation COMMAND pgm_relative_orientation_test)
+add_test(NAME absolute_orientation COMMAND pgm_absolute_orientation_test)
 add_test(NAME epipolar COMMAND pgm_epipolar_test)

@@ -225,6 +225,67 @@ internal static class NativeAbi
     internal static extern int pgm_relative_orientation(
         ref RelativeInput input, ref RelativeOutput output);
 
+    // ---------------------------------------------------------------- 绝对定向
+
+    /// <summary>
+    /// 七参数相似变换的输入，对应 <c>pgm_absolute_orientation_input</c>。
+    /// <c>Count</c> 个模型点与同样数量的地面点一一对应，三个坐标数组各自长度 <c>Count</c>。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct AbsoluteInput
+    {
+        public int Count;
+        public IntPtr ModelX;
+        public IntPtr ModelY;
+        public IntPtr ModelZ;
+        public IntPtr GroundX;
+        public IntPtr GroundY;
+        public IntPtr GroundZ;
+    }
+
+    /// <summary>
+    /// 绝对定向的输出，对应 <c>pgm_absolute_orientation_output</c>。
+    /// 两个残差指针指向调用方预分配的数组（3×Count 与 Count），不需要时给 <see cref="IntPtr.Zero"/>。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct AbsoluteOutput
+    {
+        public double Scale;
+
+        /// <summary>模型系 → 地面系，行主序，det = +1。</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 9)]
+        public double[] Rotation;
+
+        public double X0, Y0, Z0;
+
+        public double PhiRad, OmegaRad, KappaRad;
+        public double PhiDeg, OmegaDeg, KappaDeg;
+
+        public int UsedCount;
+        public int Redundancy;
+
+        public double Sigma0;
+        public double Rms;
+        public double MaxAbsResidual;
+
+        /// <summary>H = Σm'g'ᵀ 的三个奇异值，降序。σ2≈0 共线，σ3≈0 共面。</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)]
+        public double[] Singular;
+
+        public double Condition;
+        public int MirrorSuspected;
+
+        /// <summary>逐点不符值，3×Count，X/Y/Z 交错，单位与地面坐标相同。</summary>
+        public IntPtr ResidualXyz;
+
+        /// <summary>逐点不符值的模长，Count 个。</summary>
+        public IntPtr ResidualLength;
+    }
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int pgm_absolute_orientation(
+        ref AbsoluteInput input, ref AbsoluteOutput output);
+
     // ---------------------------------------------------------------- 计算机视觉匹配
 
     /// <summary>

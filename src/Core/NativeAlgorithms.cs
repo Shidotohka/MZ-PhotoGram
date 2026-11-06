@@ -283,6 +283,85 @@ public sealed class RelativeOrientationResult
     public IReadOnlyList<bool> Used { get; init; } = Array.Empty<bool>();
 }
 
+/// <summary>
+/// 一次绝对定向（七参数相似变换）的结果。算法在 <c>photogrammetry.dll</c> 中，这里只承载返回值。
+///
+/// <para>$g = \lambda R m + t$：<see cref="Scale"/>、<see cref="Rotation"/>、
+/// <see cref="X0"/>/<see cref="Y0"/>/<see cref="Z0"/> 就是这七个数。</para>
+/// </summary>
+public sealed class AbsoluteOrientationResult
+{
+    public bool Success { get; init; }
+
+    /// <summary>原生返回码。0 = 成功，2 = 点太少，3 = 退化（共线等），4 = 数值非法。</summary>
+    public int ErrorCode { get; init; }
+
+    public string Message { get; init; } = string.Empty;
+
+    /// <summary>尺度 λ：模型单位 → 地面单位。模型坐标乘它才变成米。</summary>
+    public double Scale { get; init; }
+
+    /// <summary>行主序 3×3 旋转阵，模型系 → 地面系，$\det R = +1$。</summary>
+    public IReadOnlyList<double> Rotation { get; init; } = Array.Empty<double>();
+
+    /// <summary>平移量，与地面坐标同单位。</summary>
+    public double X0 { get; init; }
+    public double Y0 { get; init; }
+    public double Z0 { get; init; }
+
+    /// <summary>旋转的三个角。<b>是「模型 → 地面」那个 R 的分解</b>，与后方交会的三个角不是同一组量。</summary>
+    public double PhiDeg { get; init; }
+    public double OmegaDeg { get; init; }
+    public double KappaDeg { get; init; }
+
+    public double PhiRad { get; init; }
+    public double OmegaRad { get; init; }
+    public double KappaRad { get; init; }
+
+    public int UsedCount { get; init; }
+
+    /// <summary>多余观测数 = 3n − 7。</summary>
+    public int Redundancy { get; init; }
+
+    /// <summary>单位权中误差，与地面坐标同单位（米制数据就是米）。</summary>
+    public double Sigma0 { get; init; }
+
+    /// <summary>控制点不符值 RMS = √(Σ|v|²/n)。验收看这个。</summary>
+    public double Rms { get; init; }
+
+    public double MaxAbsResidual { get; init; }
+
+    /// <summary>H = Σm'g'ᵀ 的三个奇异值，降序。σ₂≈0 共线；σ₃≈0 共面（能解，高程弱）。</summary>
+    public IReadOnlyList<double> Singular { get; init; } = Array.Empty<double>();
+
+    /// <summary>σ₁/σ₂。越大越病态。</summary>
+    public double Condition { get; init; }
+
+    /// <summary>
+    /// 控制点数据疑似镜像（左右手系搞反）。此时最好的真旋转也贴不上，
+    /// 残差大且呈系统性——不是算法错，是坐标轴换了。
+    /// </summary>
+    public bool MirrorSuspected { get; init; }
+
+    /// <summary>逐点不符值的模长，顺序与输入一致。</summary>
+    public IReadOnlyList<double> ResidualLength { get; init; } = Array.Empty<double>();
+
+    /// <summary>逐点不符值的三个分量，3n 个，X/Y/Z 交错。</summary>
+    public IReadOnlyList<double> ResidualXyz { get; init; } = Array.Empty<double>();
+
+    /// <summary>把模型点变到地面坐标：$g = \lambda R m + t$。</summary>
+    public GroundPointM Transform(GroundPointM model)
+    {
+        var r = Rotation;
+        if (r.Count < 9) return default;
+
+        var x = Scale * (r[0] * model.X + r[1] * model.Y + r[2] * model.Z) + X0;
+        var y = Scale * (r[3] * model.X + r[4] * model.Y + r[5] * model.Z) + Y0;
+        var z = Scale * (r[6] * model.X + r[7] * model.Y + r[8] * model.Z) + Z0;
+        return new GroundPointM(x, y, z);
+    }
+}
+
 public static class NativeAlgorithms
 {
     /// <summary>4 个框标以下不允许解算：3 个时多余观测为 0，残差恒为 0。</summary>
@@ -1093,6 +1172,169 @@ public static class NativeAlgorithms
         var p = Marshal.AllocHGlobal(values.Length * sizeof(double));
         Marshal.Copy(values, 0, p, values.Length);
         return p;
+    }
+
+    // ---------------------------------------------------------------- 绝对定向
+
+    /// <summary>
+    /// 七参数相似变换（摄影测量叫绝对定向、大地测量叫 Helmert、统计叫 Procrustes）。
+    ///
+    /// <para>模型方程 $g = \lambda R m + t$：把**模型坐标**（相对定向 + 前方交会算出来的、
+    /// 比例尺以基线长为单位的坐标）拉到**地面坐标**。闭合解、无迭代、全局最优，
+    /// 推导见 <c>Docs/绝对定向算法.md</c>。</para>
+    ///
+    /// <para>输入是<b>控制点</b>：两侧数组按点号一一对应，不是从匹配点云里抽样。
+    /// 至少 3 个，且不能共线（共线时绕该直线的旋转不可测）。</para>
+    /// </summary>
+    public static AbsoluteOrientationResult SolveAbsoluteOrientation(
+        IReadOnlyList<GroundPointM> model,
+        IReadOnlyList<GroundPointM> ground)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(ground);
+
+        if (model.Count != ground.Count)
+        {
+            return new AbsoluteOrientationResult
+            {
+                ErrorCode = -1,
+                Message = $"模型点与地面点个数不一致（{model.Count} / {ground.Count}）。",
+            };
+        }
+
+        var n = model.Count;
+        if (n < 3)
+        {
+            return new AbsoluteOrientationResult
+            {
+                ErrorCode = -1,
+                Message = $"只有 {n} 个控制点，七参数至少要 3 个。",
+            };
+        }
+
+        var mx = new double[n];
+        var my = new double[n];
+        var mz = new double[n];
+        var gx = new double[n];
+        var gy = new double[n];
+        var gz = new double[n];
+        for (var k = 0; k < n; k++)
+        {
+            mx[k] = model[k].X;
+            my[k] = model[k].Y;
+            mz[k] = model[k].Z;
+            gx[k] = ground[k].X;
+            gy[k] = ground[k].Y;
+            gz[k] = ground[k].Z;
+        }
+
+        IntPtr pmx = IntPtr.Zero, pmy = IntPtr.Zero, pmz = IntPtr.Zero;
+        IntPtr pgx = IntPtr.Zero, pgy = IntPtr.Zero, pgz = IntPtr.Zero;
+        IntPtr pxyz = IntPtr.Zero, plen = IntPtr.Zero;
+        try
+        {
+            pmx = Alloc(mx);
+            pmy = Alloc(my);
+            pmz = Alloc(mz);
+            pgx = Alloc(gx);
+            pgy = Alloc(gy);
+            pgz = Alloc(gz);
+            pxyz = Marshal.AllocHGlobal(3 * n * sizeof(double));
+            plen = Marshal.AllocHGlobal(n * sizeof(double));
+
+            var input = new NativeAbi.AbsoluteInput
+            {
+                Count = n,
+                ModelX = pmx,
+                ModelY = pmy,
+                ModelZ = pmz,
+                GroundX = pgx,
+                GroundY = pgy,
+                GroundZ = pgz,
+            };
+            var output = new NativeAbi.AbsoluteOutput
+            {
+                ResidualXyz = pxyz,
+                ResidualLength = plen,
+            };
+
+            int rc;
+            try
+            {
+                rc = NativeAbi.pgm_absolute_orientation(ref input, ref output);
+            }
+            catch (DllNotFoundException)
+            {
+                return new AbsoluteOrientationResult
+                {
+                    ErrorCode = -1,
+                    Message = "找不到 photogrammetry.dll。先运行 " +
+                              "cmake --build native/build --config Release 再重新构建托管项目。",
+                };
+            }
+            catch (BadImageFormatException)
+            {
+                return new AbsoluteOrientationResult
+                {
+                    ErrorCode = -1,
+                    Message = "photogrammetry.dll 位数不匹配。托管进程是 x64，DLL 也必须是 x64。",
+                };
+            }
+
+            if (rc != 0)
+            {
+                return new AbsoluteOrientationResult
+                {
+                    ErrorCode = rc,
+                    Message = LastError.Length > 0 ? LastError : $"绝对定向失败（rc = {rc}）。",
+                };
+            }
+
+            var rotation = new double[9];
+            Array.Copy(output.Rotation ?? new double[9], rotation, 9);
+
+            var singular = new double[3];
+            Array.Copy(output.Singular ?? new double[3], singular, 3);
+
+            var residualXyz = new double[3 * n];
+            var residualLength = new double[n];
+            Marshal.Copy(pxyz, residualXyz, 0, 3 * n);
+            Marshal.Copy(plen, residualLength, 0, n);
+
+            return new AbsoluteOrientationResult
+            {
+                Success = true,
+                ErrorCode = 0,
+                Scale = output.Scale,
+                Rotation = rotation,
+                X0 = output.X0,
+                Y0 = output.Y0,
+                Z0 = output.Z0,
+                PhiRad = output.PhiRad,
+                OmegaRad = output.OmegaRad,
+                KappaRad = output.KappaRad,
+                PhiDeg = output.PhiDeg,
+                OmegaDeg = output.OmegaDeg,
+                KappaDeg = output.KappaDeg,
+                UsedCount = output.UsedCount,
+                Redundancy = output.Redundancy,
+                Sigma0 = output.Sigma0,
+                Rms = output.Rms,
+                MaxAbsResidual = output.MaxAbsResidual,
+                Singular = singular,
+                Condition = output.Condition,
+                MirrorSuspected = output.MirrorSuspected != 0,
+                ResidualXyz = residualXyz,
+                ResidualLength = residualLength,
+            };
+        }
+        finally
+        {
+            foreach (var p in new[] { pmx, pmy, pmz, pgx, pgy, pgz, pxyz, plen })
+            {
+                if (p != IntPtr.Zero) Marshal.FreeHGlobal(p);
+            }
+        }
     }
 
     // ---------------------------------------------------------------- 计算机视觉匹配
