@@ -148,115 +148,45 @@ public static class AbsoluteOrientationTask
     {
         ArgumentNullException.ThrowIfNull(project);
 
-        var seen = new List<string>();
-        var observations = new List<AbsoluteOrientationObservation>();
+        // 绝对定向的输入就是「模型交会出来的那批控制点」——两步共用同一份交会实现。
+        // 否则「两片都刺点了吗」「两片主距一致吗」这类判断要写两遍，改漏一处不会报错。
+        var model = ModelIntersectionTask.Run(project, pair);
 
-        if (pair is null)
-        {
-            return Fail(AbsoluteOrientationFailure.NoPair, seen, observations,
-                "还没有像对。先在「相对定向」里建一对并解出相对方位元素。");
-        }
-
-        var label = $"{pair.LeftImageId} × {pair.RightImageId}";
-
-        var left = project.Images.FirstOrDefault(i => i.Id == pair.LeftImageId);
-        var right = project.Images.FirstOrDefault(i => i.Id == pair.RightImageId);
-        if (left is null || right is null)
-        {
-            return Fail(AbsoluteOrientationFailure.NoPair, seen, observations,
-                $"像对 {label} 里有影像不在工程里。", label);
-        }
-
-        var geometry = PairGeometryBuilder.FromRelative(pair.Relative, left, right);
-        if (geometry is null)
-        {
-            return Fail(AbsoluteOrientationFailure.NoRelative, seen, observations,
-                $"像对 {label} 还没有相对定向结果。绝对定向要用它给的两份位姿去交会控制点。", label);
-        }
-
-        if (left.Interior is not { IsValid: true } ioLeft ||
-            right.Interior is not { IsValid: true } ioRight)
-        {
-            return Fail(AbsoluteOrientationFailure.NoInterior, seen, observations,
-                "两片里有一片还没有有效内定向，像点换不成像平面坐标。", label);
-        }
-
-        if (Math.Abs(ioLeft.FocalLength - ioRight.FocalLength) > 1e-6)
-        {
-            return Fail(AbsoluteOrientationFailure.NoInterior, seen, observations,
-                $"两片主距不同（{ioLeft.FocalLength:0.###} / {ioRight.FocalLength:0.###} mm），" +
-                "同一像对必须同机同焦距。", label);
-        }
-
-        var focal = ioLeft.FocalLength;
-
-        foreach (var gcp in project.Gcps)
-        {
-            var onLeft = left.FindGcpPoint(gcp.Id);
-            var onRight = right.FindGcpPoint(gcp.Id);
-
-            if (onLeft is null && onRight is null)
-            {
-                seen.Add($"{gcp.Id}：两片都没刺点");
-                continue;
-            }
-            if (onLeft is null)
-            {
-                seen.Add($"{gcp.Id}：只在右片 {right.Id} 刺了点");
-                continue;
-            }
-            if (onRight is null)
-            {
-                seen.Add($"{gcp.Id}：只在左片 {left.Id} 刺了点");
-                continue;
-            }
-
-            var leftMm = CoordinateConverter.PixelToImagePlane(
-                new ImagePixel(onLeft.PixelX, onLeft.PixelY), ioLeft, left.Width, left.Height);
-            var rightMm = CoordinateConverter.PixelToImagePlane(
-                new ImagePixel(onRight.PixelX, onRight.PixelY), ioRight, right.Width, right.Height);
-
-            onLeft.PositionMm = leftMm;
-            onRight.PositionMm = rightMm;
-
-            try
-            {
-                // 复用 M5 的求交内核：位姿来自相对定向，所以出来的是模型坐标。
-                var intersection = NativeAlgorithms.IntersectRays(
-                    geometry.LeftPose, geometry.RightPose, leftMm, rightMm, focal);
-
-                observations.Add(new AbsoluteOrientationObservation(
-                    gcp.Id,
-                    intersection.Point,
-                    new GroundPointM(gcp.X, gcp.Y, gcp.Z),
-                    gcp.Type));
-            }
-            catch (Exception ex)
-            {
-                seen.Add($"{gcp.Id}：交会失败（{ex.Message}）");
-            }
-        }
+        var observations = model.Observations
+            .Select(o => new AbsoluteOrientationObservation(o.GcpId, o.Model, o.Ground, o.Type))
+            .ToList();
 
         var usable = observations.Count(o => o.Type != GcpType.CheckPoint);
+        var failure = model.Failure switch
+        {
+            ModelIntersectionFailure.None => usable >= MinPoints
+                ? AbsoluteOrientationFailure.None
+                : AbsoluteOrientationFailure.NotEnoughPoints,
+            ModelIntersectionFailure.NoPair => AbsoluteOrientationFailure.NoPair,
+            ModelIntersectionFailure.NoRelative => AbsoluteOrientationFailure.NoRelative,
+            ModelIntersectionFailure.NoInterior => AbsoluteOrientationFailure.NoInterior,
+            _ => AbsoluteOrientationFailure.NotEnoughPoints,
+        };
+
         return new AbsoluteOrientationPreparation
         {
             Observations = observations,
-            Skipped = seen,
-            Failure = usable >= MinPoints
-                ? AbsoluteOrientationFailure.None
-                : AbsoluteOrientationFailure.NotEnoughPoints,
-            Message = usable >= MinPoints
-                ? string.Empty
-                : BuildNotEnoughMessage(observations, usable, left, right),
-            PairLabel = label,
-            IsModelCoordinates = geometry.IsModelCoordinates,
+            Skipped = model.Skipped,
+            Failure = failure,
+            Message = failure switch
+            {
+                AbsoluteOrientationFailure.None => string.Empty,
+                AbsoluteOrientationFailure.NotEnoughPoints =>
+                    $"能在像对 {model.PairLabel} 的两片上都刺点的可用控制点只有 {usable} 个" +
+                    $"（七参数至少要 {MinPoints} 个）。控制点必须在同一个像对的两片上都有像点，" +
+                    "否则交会不出它的模型坐标。",
+                _ => model.Message,
+            },
+            PairLabel = model.PairLabel,
+            IsModelCoordinates = model.IsModelCoordinates,
         };
     }
 
-    /// <summary>
-    /// 跑一次绝对定向。不碰界面、不抛异常——所有失败都通过返回值表达。
-    /// 检查点（<see cref="GcpType.CheckPoint"/>）不参与解算，只用来独立验证。
-    /// </summary>
     public static AbsoluteOrientationRun Run(Project project, StereoPair? pair)
     {
         var prep = Prepare(project, pair);
@@ -347,33 +277,4 @@ public static class AbsoluteOrientationTask
         };
     }
 
-    private static AbsoluteOrientationPreparation Fail(
-        AbsoluteOrientationFailure failure,
-        List<string> skipped,
-        List<AbsoluteOrientationObservation> observations,
-        string message,
-        string label = "")
-        => new()
-        {
-            Observations = observations,
-            Skipped = skipped,
-            Failure = failure,
-            Message = message,
-            PairLabel = label,
-        };
-
-    private static string BuildNotEnoughMessage(
-        List<AbsoluteOrientationObservation> observations,
-        int usable,
-        ImageItem left,
-        ImageItem right)
-    {
-        var onlyOne = observations.Count - usable;
-        var tail = onlyOne > 0
-            ? $"，另有 {onlyOne} 个是检查点（不参与解算）"
-            : string.Empty;
-        return $"能在 {left.Id} 与 {right.Id} 上同时刺点的可用控制点只有 {usable} 个" +
-               $"（七参数至少要 {MinPoints} 个）{tail}。控制点必须在**同一个像对的两片上**都有像点，" +
-               "否则交会不出它的模型坐标。";
-    }
 }
