@@ -245,8 +245,6 @@ public static class RelativeOrientationTask
             };
         }
 
-        Apply(project, left, right, prep.Pairs, result);
-
         return new RelativeRun
         {
             Failure = RelativeFailure.None,
@@ -257,6 +255,23 @@ public static class RelativeOrientationTask
             Skipped = prep.Skipped,
             Warnings = Warnings(prep.Pairs, result, imageSigmaMm),
         };
+    }
+
+    /// <summary>
+    /// 入账：把这一份解写进工程——像对的五个元素 + 每个同名点的 q 与「是否被剔除」。
+    ///
+    /// <para><b>解算本身不写工程</b>（[工程文件格式 §9.6](../../Docs/工程文件格式.md)）：能不能算由闸门判，
+    /// 写不写由操作员按「接受」判。这个方法是「接受」唯一要调的入口。</para>
+    /// </summary>
+    public static void Commit(Project project, RelativeRun run)
+    {
+        if (!run.Success || run.Result is not { } result ||
+            run.Left is not { } left || run.Right is not { } right)
+        {
+            return;
+        }
+
+        Apply(project, left, right, run.Pairs, result);
     }
 
     /// <summary>

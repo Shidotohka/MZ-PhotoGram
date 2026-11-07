@@ -1276,6 +1276,38 @@ internal static class Program
         if (!(worst < 1e-6)) Environment.ExitCode = 1;
 
         CheckProcessInfo(win, "内定向");
+
+        // ---- 入账（v4）：框标法的六系数要进工程，而且存盘读回不许变 ----
+        var affine = (view.Image as ImageItem)?.Affine;
+        Console.WriteLine(affine is not null
+            ? $"[PASS] 六系数已入账：a=[{affine.A0:0.0000} {affine.A1:E2} {affine.A2:0.000000}]　" +
+              $"b=[{affine.B0:0.0000} {affine.B1:0.000000} {affine.B2:E2}]"
+            : "[FAIL] 框标法解完没有把 affine 写进影像");
+        if (affine is null)
+        {
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        // `--image` 那条路只把影像塞进工作区、不进工程索引，所以这里单建一个工程来存盘
+        var item = (ImageItem)view.Image!;
+        var oneImage = new Project { Name = "affine" };
+        oneImage.Images.Add(item);
+
+        var roundTrip = Path.Combine(Path.GetTempPath(), "pgm-affine.pht");
+        ProjectFile.Save(oneImage, roundTrip);
+        var reloaded = ProjectFile.Load(roundTrip);
+        File.Delete(roundTrip);
+        var back = reloaded.Images.FirstOrDefault()?.Affine;
+
+        var same = back is not null &&
+                   back.A0.Equals(affine.A0) && back.A1.Equals(affine.A1) && back.A2.Equals(affine.A2) &&
+                   back.B0.Equals(affine.B0) && back.B1.Equals(affine.B1) && back.B2.Equals(affine.B2);
+        Console.WriteLine(same
+            ? "[PASS] 六系数存盘读回逐位不变"
+            : $"[FAIL] 六系数存盘读回对不上：存 [{affine.A0:R} {affine.A2:R}] " +
+              $"读 [{(back is null ? "null" : $"{back.A0:R} {back.A2:R}")}]");
+        if (!same) Environment.ExitCode = 1;
     }
 
     /// <summary>
@@ -2153,6 +2185,50 @@ internal static class Program
             : $"[FAIL] 结果集合丢了前一份：{results.Count} 份，" +
               $"[{string.Join("、", results.Select(r => r.Kind?.ToString() ?? "—"))}]");
         if (!hasRelative || !hasModel) Environment.ExitCode = 1;
+
+        // ---- 结果入账（v4）：解完就该在工程里；存盘再读回，数值逐位不变 ----
+        var landedProject = win.CurrentProject;
+        var landedPair = landedProject.Pairs.FirstOrDefault();
+        var modelBlock = landedPair?.Model;
+        var absoluteBlock = landedPair?.Absolute;
+
+        Console.WriteLine(modelBlock is { Points.Count: > 0 }
+            ? $"[PASS] 模型交会已入账：{modelBlock.Points.Count} 个模型点" +
+              $"（第一个 {modelBlock.Points[0].GcpId} X = {modelBlock.Points[0].X:0.00000}）"
+            : "[FAIL] 模型交会没写进 pairs[].model");
+        if (modelBlock is not { Points.Count: > 0 }) Environment.ExitCode = 1;
+
+        Console.WriteLine(absoluteBlock is not null
+            ? $"[PASS] 绝对定向已入账：λ = {absoluteBlock.Lambda:0.000000}　" +
+              $"{absoluteBlock.Points.Count} 个点（检查点 {absoluteBlock.Points.Count(p => p.Check)} 个）　" +
+              $"轴序 {absoluteBlock.GroundOrder}"
+            : "[FAIL] 绝对定向没写进 pairs[].absolute");
+        if (absoluteBlock is null) Environment.ExitCode = 1;
+
+        if (modelBlock is not null && absoluteBlock is not null)
+        {
+            var roundTrip = Path.Combine(Path.GetTempPath(), "pgm-v4-roundtrip.pht");
+            ProjectFile.Save(landedProject, roundTrip);
+            var reloaded = ProjectFile.Load(roundTrip);
+            File.Delete(roundTrip);
+
+            var back = reloaded.Pairs.FirstOrDefault();
+            var backModel = back?.Model;
+            var backAbsolute = back?.Absolute;
+            var ok = backModel is not null && backAbsolute is not null &&
+                     backModel.Points.Count == modelBlock.Points.Count &&
+                     backAbsolute.Points.Count == absoluteBlock.Points.Count &&
+                     backAbsolute.Lambda.Equals(absoluteBlock.Lambda) &&
+                     backAbsolute.GroundOrder == absoluteBlock.GroundOrder &&
+                     backAbsolute.Points[0].Dxy.Equals(absoluteBlock.Points[0].Dxy) &&
+                     backModel.Points[0].X.Equals(modelBlock.Points[0].X);
+
+            Console.WriteLine(ok
+                ? $"[PASS] 存盘再读回逐位不变（λ {backAbsolute!.Lambda:0.000000}　" +
+                  $"{reloaded.Pairs.Count} 个像对，版本 {reloaded.Version}）"
+                : "[FAIL] 结果块的存盘/读回对不上");
+            if (!ok) Environment.ExitCode = 1;
+        }
 
         Console.WriteLine(win.ResultWindowIsOpen
             ? "[PASS] 解完自动打开结果窗口"
@@ -3270,6 +3346,9 @@ internal static class Program
         var project1 = MakeProject(nPoints, extraHalfPair: true);
         var run = RelativeOrientationTask.Run(project1, project1.Images[0], project1.Images[1]);
 
+        // 解算不再自己写工程（工程文件格式 §9.6）：入账是单独一步，自检里就得显式走一遍
+        if (run.Success) RelativeOrientationTask.Commit(project1, run);
+
         Check("流程层解算成功", run.Success, run.Success ? RelativeOrientationTask.Describe(run) : run.Message);
         Check("半对的点被跳过且说清楚",
             run.Skipped.Count == 1 && run.Skipped[0].Contains("T99") && run.Pairs.Count == nPoints,
@@ -3329,7 +3408,7 @@ internal static class Program
             json.Contains("\"tiePoints\"", StringComparison.Ordinal) &&
             json.Contains("\"boundTiePointId\"", StringComparison.Ordinal) &&
             json.Contains("\"relative\"", StringComparison.Ordinal) &&
-            json.Contains("\"version\": 3", StringComparison.Ordinal),
+            json.Contains("\"version\": 4", StringComparison.Ordinal),
             $"文件 {json.Length} 字节");
 
         // 模型点不进工程（Docs/小项与取舍.md X-02）：这个键曾经写出来过，但从来是空数组，
@@ -3389,6 +3468,7 @@ internal static class Program
         var outlier = MakeProject(nPoints);
         outlier.Images[1].Points[nPoints - 1].PixelX += 44;      // ≈ 2 mm，约 44 个像元
         var outlierRun = RelativeOrientationTask.Run(outlier, outlier.Images[0], outlier.Images[1]);
+        if (outlierRun.Success) RelativeOrientationTask.Commit(outlier, outlierRun);
         Check("2 mm 的粗差点被剔掉",
             outlierRun.Success && outlierRun.Result!.RejectedCount == 1 &&
             outlier.TiePoints.Count(t => t.Rejected) == 1,

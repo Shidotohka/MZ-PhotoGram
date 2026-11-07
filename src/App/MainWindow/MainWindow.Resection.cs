@@ -95,6 +95,10 @@ public partial class MainWindow
         var result = run.Result!;
         var image = CurrentImage!;
 
+        // 入账：外方位、状态、轴序、逐点残差 + 这一次的质量指标。
+        // 第 3 步会把这一句挪进结果窗口的「接受」里；现在先保持"解完即入账"的旧行为。
+        ResectionTask.Commit(image, run);
+
         // 外方位与逐点残差进结果窗口；坐标系的统一（判手性、换轴）在 Core 里做完就算完，
         // 界面上只给一套数学系坐标，不再解释是怎么换过来的
         ShowResult(ResectionResult(image, result));

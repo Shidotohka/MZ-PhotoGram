@@ -370,4 +370,65 @@ public static class AbsoluteOrientationTask
         };
     }
 
+    /// <summary>
+    /// 入账：把七参数、质量指标与逐点不符值写进像对。失败什么都不做。
+    ///
+    /// <para><b>解算本身不写工程</b>（[工程文件格式 §9.6](../../Docs/工程文件格式.md)）：
+    /// 能不能算由闸门判，写不写由操作员按「接受」判。</para>
+    ///
+    /// <para>逐点不符值在这里<b>按平面与高程拆开</b>算（不重算三维合量）：$H/B$ 放大的是高程，
+    /// 拆开才看得出问题在哪一头。文件里的地面坐标要先换成数学系再比——换轴只动 X/Y，Z 不变。</para>
+    /// </summary>
+    public static void Commit(StereoPair pair, AbsoluteOrientationRun run)
+    {
+        ArgumentNullException.ThrowIfNull(pair);
+        ArgumentNullException.ThrowIfNull(run);
+        if (!run.Success || run.Result is not { } result) return;
+
+        var solution = new AbsoluteSolution
+        {
+            Lambda = result.Scale,
+            Phi = result.PhiDeg,
+            Omega = result.OmegaDeg,
+            Kappa = result.KappaDeg,
+            Dx = result.X0,
+            Dy = result.Y0,
+            Dz = result.Z0,
+            GroundOrder = run.GroundOrder,
+            Sigma0 = result.Sigma0,
+            Gsd = run.GroundSampleDistance,
+            HbRatio = run.DepthAmplification,
+            TimeUtc = DateTimeOffset.UtcNow,
+        };
+
+        foreach (var o in run.Used)
+        {
+            AddDeviation(solution, o.GcpId, result.Transform(o.Model), o.Ground, run.GroundOrder, false);
+        }
+
+        foreach (var c in run.Checks)
+        {
+            // 检查点的"变换后位置"在解算时已经算好，直接用，别拿七参数再算一遍
+            var transformed = c.Transformed ?? result.Transform(c.Model);
+            AddDeviation(solution, c.GcpId, transformed, c.Ground, run.GroundOrder, true);
+        }
+
+        pair.Absolute = solution;
+    }
+
+    private static void AddDeviation(AbsoluteSolution solution, string gcpId, GroundPointM transformed,
+        GroundPointM groundInFile, GroundAxisOrder order, bool isCheck)
+    {
+        var ground = GroundAxes.ToMathFrame(groundInFile, order);
+        var dx = transformed.X - ground.X;
+        var dy = transformed.Y - ground.Y;
+
+        solution.Points.Add(new AbsoluteSolutionPoint
+        {
+            GcpId = gcpId,
+            Dxy = Math.Sqrt(dx * dx + dy * dy),
+            Dz = transformed.Z - ground.Z,
+            Check = isCheck,
+        });
+    }
 }

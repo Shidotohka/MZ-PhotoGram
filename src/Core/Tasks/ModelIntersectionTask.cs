@@ -42,8 +42,7 @@ public sealed record ModelPointObservation(
 /// 一次模型交会的结果：每个控制点一个模型点，外加跳过了谁、为什么。
 /// </summary>
 public sealed class ModelIntersectionOutcome
-{
-    public required ModelIntersectionFailure Failure { get; init; }
+{    public required ModelIntersectionFailure Failure { get; init; }
     public string Message { get; init; } = string.Empty;
 
     /// <summary>能交会出来的控制点，顺序与工程里的控制点顺序一致。</summary>
@@ -265,4 +264,32 @@ public static class ModelIntersectionTask
             Observations = observations,
             PairLabel = label,
         };
+
+    /// <summary>
+    /// 入账：把模型点写进像对。失败什么都不做。
+    ///
+    /// <para><b>解算本身不写工程</b>（[工程文件格式 §9.6](../../Docs/工程文件格式.md)）：
+    /// 能不能算由闸门判，写不写由操作员按「接受」判。</para>
+    /// </summary>
+    public static void Commit(StereoPair pair, ModelIntersectionOutcome run)
+    {
+        ArgumentNullException.ThrowIfNull(pair);
+        ArgumentNullException.ThrowIfNull(run);
+        if (run.Failure != ModelIntersectionFailure.None) return;
+
+        var solution = new ModelSolution { TimeUtc = DateTimeOffset.UtcNow };
+        foreach (var o in run.Observations)
+        {
+            solution.Points.Add(new ModelSolutionPoint
+            {
+                GcpId = o.GcpId,
+                X = o.Model.X,
+                Y = o.Model.Y,
+                Z = o.Model.Z,
+                ConvergenceAngleDeg = o.ConvergenceAngleDeg,
+            });
+        }
+
+        pair.Model = solution;
+    }
 }

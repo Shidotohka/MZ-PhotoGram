@@ -193,8 +193,6 @@ public static class ResectionTask
             };
         }
 
-        Apply(image, result, evidence.Order);
-
         return new ResectionRun
         {
             Failure = ResectionFailure.None,
@@ -202,6 +200,34 @@ public static class ResectionTask
             Evidence = evidence,
             Observations = prep.Observations,
             Skipped = prep.Skipped,
+        };
+    }
+
+    /// <summary>
+    /// 入账：把这一份解写进影像——外方位、状态、地面轴序、逐点残差，以及这一次的质量指标。
+    ///
+    /// <para><b>解算本身不写工程</b>（[工程文件格式 §9.6](../../Docs/工程文件格式.md)）：能不能算由闸门判，
+    /// 写不写由操作员按「接受」判。这个方法是「接受」唯一要调的入口；失败的结果什么都不做。</para>
+    /// </summary>
+    public static void Commit(ImageItem image, ResectionRun run)
+    {
+        if (!run.Success || run.Result is not { } result) return;
+
+        Apply(image, result, run.Evidence?.Order ?? GroundAxisOrder.EastNorth);
+
+        image.Resection = new ResectionQuality
+        {
+            Sigma0Mm = result.Sigma0Mm,
+            ParamSd = new[]
+            {
+                result.MXs, result.MYs, result.MZs,
+                result.MPhi, result.MOmega, result.MKappa,
+            },
+            Condition = result.Condition,
+            Iterations = result.Iterations,
+            UsedCount = result.UsedCount,
+            RejectedCount = run.Skipped.Count,
+            TimeUtc = DateTimeOffset.UtcNow,
         };
     }
 

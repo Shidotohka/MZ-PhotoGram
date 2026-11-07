@@ -85,6 +85,20 @@ public sealed class ImageItem
     public ImageStatus Status { get; set; } = ImageStatus.NotProcessed;
 
     /// <summary>
+    /// 框标仿射的六个系数。只有框标法内定向才有；参数式内定向（直接填 f/x0/y0/δ）为 null。
+    ///
+    /// <para>为什么非存不可：从它反算出的等效 f/x0/y0 **推不回**旋转与倾斜。只存等效内参，
+    /// 重开工程复核时看到的是"另一组数"，对不上当时的残差。</para>
+    /// </summary>
+    public AffineInterior? Affine { get; set; }
+
+    /// <summary>内定向的入账时刻。没做过为 null。</summary>
+    public DateTimeOffset? InteriorTimeUtc { get; set; }
+
+    /// <summary>后方交会的结果质量（σ₀、参数中误差、条件数……）。外方位本身在 <see cref="Exterior"/>。</summary>
+    public ResectionQuality? Resection { get; set; }
+
+    /// <summary>
     /// 后方交会判定出的地面轴序。只用于显示时的换轴换算，<b>不写盘</b>——
     /// 它是从观测数据反推出来的结论，不是输入。没做过后方交会时为 null。
     /// </summary>
@@ -175,6 +189,12 @@ public sealed class StereoPair
 
     /// <summary>相对定向结果，未解算时为 null。</summary>
     public RelativeOrientation? Relative { get; set; }
+
+    /// <summary>模型交会的成果（每个控制点一个模型坐标）。没做过为 null。</summary>
+    public ModelSolution? Model { get; set; }
+
+    /// <summary>绝对定向的成果（七参数 + 逐点不符值）。没做过为 null。</summary>
+    public AbsoluteSolution? Absolute { get; set; }
 }
 
 /// <summary>
@@ -241,14 +261,124 @@ public sealed class RelativeOrientation
     public double TextbookBz => Math.Abs(Bx) < 1e-9 ? double.NaN : Bz / Bx;
 }
 
+/// <summary>
+/// 框标仿射的六个系数：$x = a_0 + a_1 i + a_2 j$，$y = b_0 + b_1 i + b_2 j$（$i,j$ 是像元坐标）。
+/// 见[工程文件格式 §9.1](../../Docs/工程文件格式.md)。
+/// </summary>
+public sealed class AffineInterior
+{
+    public double A0 { get; set; }
+    public double A1 { get; set; }
+    public double A2 { get; set; }
+    public double B0 { get; set; }
+    public double B1 { get; set; }
+    public double B2 { get; set; }
+}
+
+/// <summary>
+/// 后方交会的<b>质量指标</b>。外方位本身在 <see cref="ImageItem.Exterior"/> 里（v2 起就有），
+/// 这一块补的是"这次解靠不靠得住"——没有它，重开工程只剩六个参数，σ₀ 与条件数就再也拿不回来。
+/// </summary>
+public sealed class ResectionQuality
+{
+    /// <summary>单位权中误差，mm。</summary>
+    public double Sigma0Mm { get; set; }
+
+    /// <summary>参数中误差：位置 m、角度 rad，顺序 Xs Ys Zs φ ω κ。</summary>
+    public double[] ParamSd { get; set; } = new double[6];
+
+    /// <summary>法方程条件数。</summary>
+    public double Condition { get; set; }
+
+    public int Iterations { get; set; }
+    public int UsedCount { get; set; }
+
+    /// <summary>被粗差判据剔除的点数。</summary>
+    public int RejectedCount { get; set; }
+
+    public DateTimeOffset TimeUtc { get; set; }
+}
+
+/// <summary>模型交会里的一个控制点：模型坐标 + 交会角。</summary>
+public sealed class ModelSolutionPoint
+{
+    public required string GcpId { get; init; }
+
+    /// <summary>模型坐标，<b>自由比例尺</b>（基线长为 1），无量纲。</summary>
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Z { get; set; }
+
+    /// <summary>两条视线的交会角，度。</summary>
+    public double ConvergenceAngleDeg { get; set; }
+}
+
+/// <summary>模型交会的成果。见[工程文件格式 §9.3](../../Docs/工程文件格式.md)。</summary>
+public sealed class ModelSolution
+{
+    public List<ModelSolutionPoint> Points { get; } = new();
+    public DateTimeOffset TimeUtc { get; set; }
+}
+
+/// <summary>绝对定向里的一个点：平面合量与高程的不符值。</summary>
+public sealed class AbsoluteSolutionPoint
+{
+    public required string GcpId { get; init; }
+
+    /// <summary>平面合量 $\sqrt{\Delta x^2+\Delta y^2}$，m。</summary>
+    public double Dxy { get; set; }
+
+    /// <summary>高程分量 $\Delta z$，m。</summary>
+    public double Dz { get; set; }
+
+    /// <summary>检查点：不参与解算，只评精度。</summary>
+    public bool Check { get; set; }
+}
+
+/// <summary>绝对定向的成果：七参数 + 质量 + 逐点不符值。见[工程文件格式 §9.4](../../Docs/工程文件格式.md)。</summary>
+public sealed class AbsoluteSolution
+{
+    /// <summary>尺度（模型 → 地面）。</summary>
+    public double Lambda { get; set; } = 1.0;
+
+    /// <summary>三个旋转角，<b>度</b>（与界面、<see cref="RelativeOrientation"/> 同口径）。</summary>
+    public double Phi { get; set; }
+    public double Omega { get; set; }
+    public double Kappa { get; set; }
+
+    /// <summary>平移，m。</summary>
+    public double Dx { get; set; }
+    public double Dy { get; set; }
+    public double Dz { get; set; }
+
+    /// <summary>
+    /// 解算时判出的地面轴序。<b>必须存</b>：逐点不符值是在这个口径下算的，
+    /// 重判若得另一个答案，残差会被按错误方向读。
+    /// </summary>
+    public GroundAxisOrder GroundOrder { get; set; } = GroundAxisOrder.EastNorth;
+
+    /// <summary>单位权中误差，m。</summary>
+    public double Sigma0 { get; set; }
+
+    /// <summary>地面采样间隔，m/像元。</summary>
+    public double Gsd { get; set; }
+
+    /// <summary>$H/B$：深度放大的倍数。</summary>
+    public double HbRatio { get; set; }
+
+    public List<AbsoluteSolutionPoint> Points { get; } = new();
+    public DateTimeOffset TimeUtc { get; set; }
+}
+
 /// <summary>工程：索引的唯一真源。影像像素数据不在此结构中。</summary>
 public sealed class Project
 {
     /// <summary>
-    /// 工程文件版本。3 = 同名点（tiePoints）与像对相对定向结果。
+    /// 工程文件版本。4 = 结果入账（内定向仿射、后方交会质量、模型交会、绝对定向四个块）。
+    /// 3 = 同名点与像对相对定向结果；2 = 内/外方位、框标、像点。
     /// 读入时接受 ≤ 本值的文件，写出时一律写本值。
     /// </summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     public int Version { get; set; } = CurrentVersion;
     public string Name { get; set; } = "";

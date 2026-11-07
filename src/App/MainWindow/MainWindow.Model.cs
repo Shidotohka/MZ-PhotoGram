@@ -99,6 +99,9 @@ public partial class MainWindow
 
         _modelPoints = outcome.Observations.ToDictionary(o => o.GcpId, o => o);
 
+        // 入账：把模型点写进像对。第 3 步挪进「接受」；现在先保持旧行为
+        ModelIntersectionTask.Commit(pair, outcome);
+
         foreach (var warning in outcome.Warnings) Log("!", warning);
 
         var worst = outcome.Observations.Min(o => o.ConvergenceAngleDeg);

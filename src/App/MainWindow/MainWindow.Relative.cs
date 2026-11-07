@@ -415,6 +415,9 @@ public partial class MainWindow
         var table = RelativeResultTable(run);
         var r = run.Result!;
 
+        // 入账：像对的五个元素 + 每个同名点的 q。第 3 步挪进「接受」；现在先保持旧行为
+        RelativeOrientationTask.Commit(_project, run);
+
         LogSolve("相对定向", $"{left?.Id} → {right?.Id}", true,
             $"{r.Iterations} 轮　{r.UsedCount}/{run.Pairs.Count} 对　σ₀ {r.Sigma0Mm:0.0000} mm　" +
             $"q_rms {r.QRmsMm:0.0000} mm　条件数 {r.Condition:0.0E+0}　冻结 {GaugeName(r.Gauge)}");

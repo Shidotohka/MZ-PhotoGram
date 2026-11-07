@@ -158,6 +158,26 @@ public static class ProjectFile
             Y0 = i.Interior?.Y0 ?? 0,
             PixelSize = i.Interior?.PixelSizeMm ?? 0,
             HasInterior = i.Interior is not null,
+            InteriorTimeUtc = i.InteriorTimeUtc,
+            Affine = i.Affine is { } a ? new AffineDto
+            {
+                A0 = a.A0,
+                A1 = a.A1,
+                A2 = a.A2,
+                B0 = a.B0,
+                B1 = a.B1,
+                B2 = a.B2
+            } : null,
+            Resection = i.Resection is { } q ? new ResectionDto
+            {
+                Sigma0 = q.Sigma0Mm,
+                ParamSd = q.ParamSd.ToList(),
+                Condition = q.Condition,
+                Iterations = q.Iterations,
+                UsedCount = q.UsedCount,
+                RejectedCount = q.RejectedCount,
+                TimeUtc = q.TimeUtc
+            } : null,
             Status = i.Status.ToString(),
             HasExterior = i.Exterior is not null,
             Xs = i.Exterior?.Xs ?? 0,
@@ -222,6 +242,40 @@ public static class ProjectFile
                 MaxQ = r.MaxQ,
                 Condition = r.Condition,
                 TimeUtc = r.TimeUtc
+            } : null,
+            Model = p.Model is { } m ? new ModelSolutionDto
+            {
+                TimeUtc = m.TimeUtc,
+                Points = m.Points.Select(pt => new ModelPointDto
+                {
+                    GcpId = pt.GcpId,
+                    X = pt.X,
+                    Y = pt.Y,
+                    Z = pt.Z,
+                    AngleDeg = pt.ConvergenceAngleDeg
+                }).ToList()
+            } : null,
+            Absolute = p.Absolute is { } abs ? new AbsoluteSolutionDto
+            {
+                Lambda = abs.Lambda,
+                Phi = abs.Phi,
+                Omega = abs.Omega,
+                Kappa = abs.Kappa,
+                Dx = abs.Dx,
+                Dy = abs.Dy,
+                Dz = abs.Dz,
+                GroundOrder = abs.GroundOrder.ToString(),
+                Sigma0 = abs.Sigma0,
+                Gsd = abs.Gsd,
+                HbRatio = abs.HbRatio,
+                TimeUtc = abs.TimeUtc,
+                Points = abs.Points.Select(pt => new AbsolutePointDto
+                {
+                    GcpId = pt.GcpId,
+                    Dxy = pt.Dxy,
+                    Dz = pt.Dz,
+                    Check = pt.Check
+                }).ToList()
             } : null
         }).ToList()
     };
@@ -318,6 +372,40 @@ public static class ProjectFile
                 };
             }
 
+            item.InteriorTimeUtc = i.InteriorTimeUtc;
+
+            if (i.Affine is { } affine)
+            {
+                item.Affine = new AffineInterior
+                {
+                    A0 = affine.A0,
+                    A1 = affine.A1,
+                    A2 = affine.A2,
+                    B0 = affine.B0,
+                    B1 = affine.B1,
+                    B2 = affine.B2
+                };
+            }
+
+            if (i.Resection is { } quality)
+            {
+                // 六个参数中误差：短了补 0、长了截断，别让手写的文件把数组形状搞乱
+                var sd = new double[6];
+                var read = quality.ParamSd ?? new List<double>();
+                for (var k = 0; k < sd.Length && k < read.Count; k++) sd[k] = read[k];
+
+                item.Resection = new ResectionQuality
+                {
+                    Sigma0Mm = quality.Sigma0,
+                    ParamSd = sd,
+                    Condition = quality.Condition,
+                    Iterations = quality.Iterations,
+                    UsedCount = quality.UsedCount,
+                    RejectedCount = quality.RejectedCount,
+                    TimeUtc = quality.TimeUtc
+                };
+            }
+
             foreach (var m in i.FiducialMarks ?? new List<FiducialMarkDto>())
                 item.FiducialMarks.Add(new FiducialMark { FiducialId = m.Id, I = m.I, J = m.J });
 
@@ -393,6 +481,59 @@ public static class ProjectFile
                     Condition = r.Condition,
                     TimeUtc = r.TimeUtc
                 };
+            }
+
+            if (p.Model is { } m)
+            {
+                var model = new ModelSolution { TimeUtc = m.TimeUtc };
+                foreach (var pt in m.Points ?? new List<ModelPointDto>())
+                {
+                    if (string.IsNullOrWhiteSpace(pt.GcpId)) continue;
+                    model.Points.Add(new ModelSolutionPoint
+                    {
+                        GcpId = pt.GcpId,
+                        X = pt.X,
+                        Y = pt.Y,
+                        Z = pt.Z,
+                        ConvergenceAngleDeg = pt.AngleDeg
+                    });
+                }
+
+                pair.Model = model;
+            }
+
+            if (p.Absolute is { } abs)
+            {
+                var solution = new AbsoluteSolution
+                {
+                    Lambda = abs.Lambda,
+                    Phi = abs.Phi,
+                    Omega = abs.Omega,
+                    Kappa = abs.Kappa,
+                    Dx = abs.Dx,
+                    Dy = abs.Dy,
+                    Dz = abs.Dz,
+                    GroundOrder = Enum.TryParse<GroundAxisOrder>(abs.GroundOrder, out var order)
+                        ? order
+                        : GroundAxisOrder.EastNorth,
+                    Sigma0 = abs.Sigma0,
+                    Gsd = abs.Gsd,
+                    HbRatio = abs.HbRatio,
+                    TimeUtc = abs.TimeUtc
+                };
+                foreach (var pt in abs.Points ?? new List<AbsolutePointDto>())
+                {
+                    if (string.IsNullOrWhiteSpace(pt.GcpId)) continue;
+                    solution.Points.Add(new AbsoluteSolutionPoint
+                    {
+                        GcpId = pt.GcpId,
+                        Dxy = pt.Dxy,
+                        Dz = pt.Dz,
+                        Check = pt.Check
+                    });
+                }
+
+                pair.Absolute = solution;
             }
 
             project.Pairs.Add(pair);
@@ -526,6 +667,14 @@ public static class ProjectFile
         public int Height { get; set; }
         public string? CameraId { get; set; }
         public bool HasInterior { get; set; }
+        public DateTimeOffset? InteriorTimeUtc { get; set; }
+
+        /// <summary>v4：框标仿射六系数。参数式内定向没有。</summary>
+        public AffineDto? Affine { get; set; }
+
+        /// <summary>v4：后方交会质量。</summary>
+        public ResectionDto? Resection { get; set; }
+
         public double FocalLength { get; set; }
         public double X0 { get; set; }
         public double Y0 { get; set; }
@@ -571,7 +720,82 @@ public static class ProjectFile
 
         /// <summary>相对定向结果，没解过为 null（写出时整段省略）。</summary>
         public RelativeDto? Relative { get; set; }
+
+        /// <summary>模型交会的成果（v4）。</summary>
+        public ModelSolutionDto? Model { get; set; }
+
+        /// <summary>绝对定向的成果（v4）。</summary>
+        public AbsoluteSolutionDto? Absolute { get; set; }
     }
+
+    /// <summary>v4：模型交会。模型坐标是自由比例尺，无量纲。</summary>
+    private sealed class ModelSolutionDto
+    {
+        public DateTimeOffset TimeUtc { get; set; }
+        public List<ModelPointDto>? Points { get; set; }
+    }
+
+    private sealed class ModelPointDto
+    {
+        public string? GcpId { get; set; }
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Z { get; set; }
+        public double AngleDeg { get; set; }
+    }
+
+    /// <summary>v4：绝对定向。角度写度，轴序写枚举名。</summary>
+    private sealed class AbsoluteSolutionDto
+    {
+        public double Lambda { get; set; }
+        public double Phi { get; set; }
+        public double Omega { get; set; }
+        public double Kappa { get; set; }
+        public double Dx { get; set; }
+        public double Dy { get; set; }
+        public double Dz { get; set; }
+
+        /// <summary>`EastNorth` / `NorthEast`。判不出的老文件没有这个键，读时默认东-北。</summary>
+        public string? GroundOrder { get; set; }
+
+        public double Sigma0 { get; set; }
+        public double Gsd { get; set; }
+        public double HbRatio { get; set; }
+        public DateTimeOffset TimeUtc { get; set; }
+        public List<AbsolutePointDto>? Points { get; set; }
+    }
+
+    private sealed class AbsolutePointDto
+    {
+        public string? GcpId { get; set; }
+        public double Dxy { get; set; }
+        public double Dz { get; set; }
+        public bool Check { get; set; }
+    }
+
+    /// <summary>v4：框标仿射六系数。</summary>
+    private sealed class AffineDto
+    {
+        public double A0 { get; set; }
+        public double A1 { get; set; }
+        public double A2 { get; set; }
+        public double B0 { get; set; }
+        public double B1 { get; set; }
+        public double B2 { get; set; }
+    }
+
+    /// <summary>v4：后方交会的质量指标（外方位本身在影像的 xs…kappa）。</summary>
+    private sealed class ResectionDto
+    {
+        public double Sigma0 { get; set; }
+        public List<double>? ParamSd { get; set; }
+        public double Condition { get; set; }
+        public int Iterations { get; set; }
+        public int UsedCount { get; set; }
+        public int RejectedCount { get; set; }
+        public DateTimeOffset TimeUtc { get; set; }
+    }
+
 
     /// <summary>
     /// 相对定向结果的一段。角度写的是<b>度</b>（与界面一致），基线写的是单位方向。

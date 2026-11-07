@@ -145,6 +145,8 @@ public partial class MainWindow
             PixelSizeMm = pixelMm,
         };
         image.Interior = io;
+        image.Affine = null;                        // 参数式没有六系数（手改过框标法再回来，别留着旧系数）
+        image.InteriorTimeUtc = DateTimeOffset.Now;
         image.Status = ImageStatus.InteriorDone;
 
         OnImageLoaded(null, image);
@@ -239,6 +241,17 @@ public partial class MainWindow
             Y0 = result.Y0Mm,
             PixelSizeMm = result.PixelSizeMm,
         };
+        // 六系数一起入账：反算的 f/x0/y0 推不回旋转与倾斜，重开复核要靠它们
+        image.Affine = new AffineInterior
+        {
+            A0 = result.A0,
+            A1 = result.A1,
+            A2 = result.A2,
+            B0 = result.B0,
+            B1 = result.B1,
+            B2 = result.B2,
+        };
+        image.InteriorTimeUtc = DateTimeOffset.Now;
         image.Status = ImageStatus.InteriorDone;
 
         // 结果与逐点残差进结果窗口，右栏不再摆结果
