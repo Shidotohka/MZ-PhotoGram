@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Photogrammetry.App;
+using Photogrammetry.App.Services;
 using Photogrammetry.Core;
 using Photogrammetry.Core.Tasks;
 
@@ -67,6 +68,13 @@ internal static class Program
         if (args.Any(a => string.Equals(a, "--abi", StringComparison.OrdinalIgnoreCase)))
         {
             AbiCheck();
+            return;
+        }
+
+        // 影像缓存的容量行为：不开窗口、不解工程，直接拿几张临时 PNG 压预算。
+        if (args.Any(a => string.Equals(a, "--cache", StringComparison.OrdinalIgnoreCase)))
+        {
+            CacheCheck();
             return;
         }
 
@@ -3257,6 +3265,12 @@ internal static class Program
             json.Contains("\"version\": 3", StringComparison.Ordinal),
             $"文件 {json.Length} 字节");
 
+        // 模型点不进工程（Docs/小项与取舍.md X-02）：这个键曾经写出来过，但从来是空数组，
+        // 留着会让人以为"模型没存上"。现在连键都不写。
+        Check("存盘不写 models 键",
+            !json.Contains("\"models\"", StringComparison.Ordinal),
+            "模型点是一次解算的中间产物，不落盘");
+
         Check("读回：同名点与绑定关系",
             reloaded.TiePoints.Count == nPoints + 1 &&
             reloaded.Images.Sum(i => i.Points.Count(p => p.BoundTiePointId is not null)) == 2 * nPoints + 1 &&
@@ -3619,6 +3633,114 @@ internal static class Program
             if (FindChild<T>(child) is { } found) return found;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 影像缓存的容量行为（[小项与取舍](../Docs/小项与取舍.md) X-01、ADR-24）。
+    ///
+    /// <para><b>只断言对外承诺</b>：不超预算、命中不重解、淘汰后还能重载、清空归零。
+    /// 不断言"淘汰的一定是最久没用那张"——那是 <c>MemoryCache</c> 的内部策略（分代时钟 + 按比例压缩），
+    /// 不是我们的约定，钉死它等于把库的实现细节写进测试。</para>
+    /// </summary>
+    private static void CacheCheck()
+    {
+        Console.WriteLine("影像缓存─────────────────────────────────────────────");
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        // 64×64 的 PNG，按 4 字节/像元估算是 16 KB/张；文件多大不影响结论。
+        const int side = 64;
+        const long one = (long)side * side * 4;
+
+        var dir = Path.Combine(Path.GetTempPath(), "pgm-cache-test");
+        Directory.CreateDirectory(dir);
+        var files = new List<string>();
+        try
+        {
+            for (var k = 0; k < 4; k++)
+            {
+                var path = Path.Combine(dir, $"p{k}.png");
+                WritePng(path, side, side, k);
+                files.Add(path);
+            }
+
+            // ---- 1 装得下就不淘汰 ----
+            var lib = new ImageLibrary(maxBytes: one * 2 + one / 2);   // 40 KB，正好放两张
+            var a = lib.LoadAsync("A", files[0]).GetAwaiter().GetResult();
+            lib.LoadAsync("B", files[1]).GetAwaiter().GetResult();
+            Check("两张都装得下", lib.Count == 2 && lib.Bytes == 2 * one,
+                $"{lib.Count} 张　{lib.Bytes / 1024} KB / 预算 {lib.Limit / 1024} KB");
+
+            // ---- 2 再要一次走命中，不重解码 ----
+            var again = lib.LoadAsync("A", files[0]).GetAwaiter().GetResult();
+            Check("再要一次是命中，不重复解码",
+                ReferenceEquals(again, a) && lib.Count == 2 && lib.Bytes == 2 * one,
+                $"同一个位图对象 {ReferenceEquals(again, a)}　{lib.Count} 张");
+
+            // ---- 3 超预算就淘汰，占用不越线 ----
+            lib.LoadAsync("C", files[2]).GetAwaiter().GetResult();
+            string Alive(ImageLibrary cache) =>
+                string.Join(",", new[] { "A", "B", "C", "D" }.Where(id => cache.TryGet(id, out _)));
+            Check("超预算时淘汰，占用不越线",
+                lib.Bytes <= lib.Limit && lib.Count == 2,
+                $"{lib.Count} 张　{lib.Bytes / 1024} KB / 预算 {lib.Limit / 1024} KB　活着：{Alive(lib)}");
+
+            // ---- 4 刚打开的那张必须活着（库自己的压缩顺序恰好相反，这条是那道防线的守门人）----
+            // 上面第 2 条又读了一次 A，所以此刻的顺序是「B 最旧 → A 刚用过 → C 最新」，该出局的是 B。
+            Check("刚打开的那张不会被自己挤掉",
+                lib.TryGet("C", out _) && !lib.TryGet("B", out _),
+                $"活着：{Alive(lib)}（最久没用的 B 应该已经出局）");
+
+            // ---- 5 被淘汰的那张还能重新载入（淘汰只该让它变慢，不该让它消失）----
+            var reloaded = lib.LoadAsync("B", files[1]).GetAwaiter().GetResult();
+            Check("被淘汰的影像还能重载",
+                reloaded is { PixelWidth: side, PixelHeight: side },
+                $"B 已淘汰，重载 {reloaded.PixelWidth}×{reloaded.PixelHeight}");
+
+            // ---- 6 删一张，占用跟着降 ----
+            var before = lib.Bytes;
+            lib.Remove("C");
+            Check("删掉的影像立刻取不到，占用跟着降",
+                !lib.TryGet("C", out _) && lib.Bytes < before,
+                $"占用 {before / 1024} → {lib.Bytes / 1024} KB");
+
+            // ---- 7 换工程时清空归零 ----
+            lib.Clear();
+            Check("清空之后既没有条目也没有占用", lib.Count == 0 && lib.Bytes == 0,
+                $"{lib.Count} 张　{lib.Bytes} 字节");
+
+            // ---- 8 预算比一张还小时也不崩 ----
+            var tiny = new ImageLibrary(maxBytes: one / 2);
+            var p3 = tiny.LoadAsync("D", files[3]).GetAwaiter().GetResult();
+            Check("预算比一张还小时，图照样读得出来",
+                p3 is { PixelWidth: side } && tiny.Count == 0,
+                $"预算 {tiny.Limit / 1024} KB，单张 {one / 1024} KB，缓存里 {tiny.Count} 张（单张超预算就不收）");
+        }
+        finally
+        {
+            foreach (var f in files) if (File.Exists(f)) File.Delete(f);
+        }
+
+        Console.WriteLine(failures == 0 ? "SELFTEST PASS" : $"SELFTEST FAIL ({failures})");
+        Environment.ExitCode = failures == 0 ? 0 : 1;
+    }
+
+    private static void WritePng(string path, int width, int height, int seed)
+    {
+        var stride = width * 3;
+        var pixels = new byte[stride * height];
+        for (var i = 0; i < pixels.Length; i++) pixels[i] = (byte)((i * 7 + seed * 31) % 251);
+
+        var bmp = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgr24, null, pixels, stride);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bmp));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
     }
 }
   

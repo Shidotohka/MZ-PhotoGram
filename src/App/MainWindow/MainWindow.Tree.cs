@@ -28,9 +28,7 @@ public partial class MainWindow
         {
             BuildImageGroup(),
             BuildPlaceholderGroup("控制点", "◆", _project.Gcps.Count, "尚未导入控制点"),
-            BuildPlaceholderGroup("像对", "⊟", _project.Pairs.Count, "尚未建立像对"),
-            BuildPlaceholderGroup("模型", "◈", _project.Models.Count, "尚未建立模型"),
-            BuildPlaceholderGroup("计算结果", "≡", 0, "尚无计算结果")
+            BuildPlaceholderGroup("像对", "⊟", _project.Pairs.Count, "尚未建立像对")
         };
 
         DataTree.ItemsSource = roots;

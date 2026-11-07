@@ -241,41 +241,6 @@ public sealed class RelativeOrientation
     public double TextbookBz => Math.Abs(Bx) < 1e-9 ? double.NaN : Bz / Bx;
 }
 
-/// <summary>模型：绝对定向的输入与输出。</summary>
-public sealed class ModelItem
-{
-    public required string Id { get; init; }
-
-    /// <summary>模型坐标系下的点，键为点号。</summary>
-    public Dictionary<string, GroundPointM> ModelPoints { get; } = new();
-
-    public AbsoluteOrientation? Absolute { get; set; }
-    public List<string> GcpIds { get; } = new();
-}
-
-/// <summary>绝对定向七参数。</summary>
-public sealed class AbsoluteOrientation
-{
-    public double Scale { get; set; } = 1.0;
-    public double Phi { get; set; }
-    public double Omega { get; set; }
-    public double Kappa { get; set; }
-    public double DeltaX { get; set; }
-    public double DeltaY { get; set; }
-    public double DeltaZ { get; set; }
-    public double RmsGcp { get; set; }
-}
-
-/// <summary>结果索引。完整残差表存放在 results/ 下的独立文件。</summary>
-public sealed class ResultRef
-{
-    public required string Id { get; init; }
-    public required string Task { get; init; }
-    public string? FilePath { get; set; }
-    public DateTimeOffset TimeUtc { get; set; } = DateTimeOffset.UtcNow;
-    public string? Summary { get; set; }
-}
-
 /// <summary>工程：索引的唯一真源。影像像素数据不在此结构中。</summary>
 public sealed class Project
 {
@@ -314,8 +279,6 @@ public sealed class Project
     public string? ControlPointZoomDirectoryFullPath { get; set; }
 
     public List<StereoPair> Pairs { get; } = new();
-    public List<ModelItem> Models { get; } = new();
-    public List<ResultRef> Results { get; } = new();
 
     /// <summary>按点号找控制点。</summary>
     public Gcp? FindGcp(string? id) =>

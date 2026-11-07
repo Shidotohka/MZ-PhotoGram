@@ -223,11 +223,6 @@ public static class ProjectFile
                 Condition = r.Condition,
                 TimeUtc = r.TimeUtc
             } : null
-        }).ToList(),
-        Models = project.Models.Select(m => new ModelDto
-        {
-            Id = m.Id,
-            GcpIds = m.GcpIds.ToList()
         }).ToList()
     };
 
@@ -394,13 +389,6 @@ public static class ProjectFile
         RestoreTiePoints(dto, project);
         ValidatePairs(project);
 
-        foreach (var m in dto.Models ?? new List<ModelDto>())
-        {
-            var model = new ModelItem { Id = m.Id ?? "" };
-            foreach (var id in m.GcpIds ?? new List<string>()) model.GcpIds.Add(id);
-            project.Models.Add(model);
-        }
-
         return project;
     }
 
@@ -485,7 +473,6 @@ public static class ProjectFile
         public List<GcpDto>? Gcps { get; set; }
         public List<TiePointDto>? TiePoints { get; set; }
         public List<PairDto>? Pairs { get; set; }
-        public List<ModelDto>? Models { get; set; }
     }
 
     private sealed class CameraDto
@@ -599,11 +586,5 @@ public static class ProjectFile
         public string? Id { get; set; }
         public double? Q { get; set; }
         public bool Rejected { get; set; }
-    }
-
-    private sealed class ModelDto
-    {
-        public string? Id { get; set; }
-        public List<string>? GcpIds { get; set; }
     }
 }
