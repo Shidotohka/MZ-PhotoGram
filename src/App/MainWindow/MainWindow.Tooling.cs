@@ -30,6 +30,9 @@ public partial class MainWindow
     /// <summary>「输入检查」卡上的原文。Snap 用它断言这张卡不再念无关的相机检校文件。</summary>
     internal string CheckSummaryText => CheckText?.Text ?? string.Empty;
 
+    /// <summary>「求模型点」按钮现在能不能点。Snap 用它验按钮状态随刺点刷新。</summary>
+    internal bool ModelSolveEnabled => ModelSolveButton?.IsEnabled == true;
+
     /// <summary>
     /// 按厂家手册的微米数填一组参数式内参并应用。Snap 用它验「µm 输入 → mm/px 落库」这条换算；
     /// 界面上对应的就是「方式一：参数式」那四个框加「应用到当前影像」。
@@ -57,6 +60,7 @@ public partial class MainWindow
     // SolveResectionNow           MainWindow.Resection.cs  跑一次后方交会并刷新点表与残差页
     // CurrentProject              本文件                    读当前工程
     // CheckSummaryText            本文件                    读「输入检查」卡的原文
+    // ModelSolveEnabled           本文件                    读「求模型点」按钮能不能点
     // ApplyParametricForTooling   本文件                    填参数式内参（微米）并应用
     //
     // 只有最后两条（`.pht` 之外的两条读口）住在本文件里，其余七条留在它们各自的职责文件内：这些方法要碰

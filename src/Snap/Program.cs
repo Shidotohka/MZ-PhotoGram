@@ -1701,9 +1701,6 @@ internal static class Program
         var left = project.Images.First(i => i.Id == pair.LeftImageId);
         var right = project.Images.First(i => i.Id == pair.RightImageId);
 
-        var (ground, bound, baseM) = SeedGcpScene(win, left, right);
-        Console.WriteLine($"  造了 {ground.Count} 个控制点（后 2 个检查点），两片共绑定 {bound} 个像点");
-
         if (!win.SelectModuleForTooling("模型交会"))
         {
             Console.WriteLine("[FAIL] 切不到「模型交会」模块");
@@ -1712,6 +1709,23 @@ internal static class Program
         }
 
         Pump(win);
+
+        // 先切进模块、再刺点：这就是用户手上的顺序（空模块 → 一个个刺 → 按「求模型点」）。
+        // 按旧代码，按钮状态只在切模块和解算时算一次，刺完点仍是灰的，看着像"点了没反应"。
+        Console.WriteLine(win.ModelSolveEnabled
+            ? "[FAIL] 一个点都没刺，「求模型点」却是可点的"
+            : "[PASS] 空模块时「求模型点」灰着（闸门起作用）");
+        if (win.ModelSolveEnabled) Environment.ExitCode = 1;
+
+        var (ground, bound, baseM) = SeedGcpScene(win, left, right);
+        Console.WriteLine($"  造了 {ground.Count} 个控制点（后 2 个检查点），两片共绑定 {bound} 个像点");
+
+        Pump(win);
+        Console.WriteLine(win.ModelSolveEnabled
+            ? "[PASS] 刺完点后「求模型点」自动变可用（状态随刺点刷新）"
+            : "[FAIL] 刺完点按钮仍是灰的——状态没刷新，用户会以为点了没反应");
+        if (!win.ModelSolveEnabled) Environment.ExitCode = 1;
+
         win.UpdateModelPanel();
         Pump(win);
 

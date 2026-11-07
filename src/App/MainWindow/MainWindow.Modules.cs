@@ -150,7 +150,6 @@ public partial class MainWindow
         RefreshPointTable();
         if (isResection) UpdateResectionPanel();
         if (isRelative) UpdateRelativePanel();
-        if (isModel) UpdateModelPanel();
         if (isAbsolute) UpdateAbsolutePanel();
 
         // 离开前方交会就把配对清掉：留着两个临时像点却不在这个模块，谁也说不清它们是什么

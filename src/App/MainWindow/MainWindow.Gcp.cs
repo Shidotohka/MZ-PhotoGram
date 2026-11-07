@@ -187,7 +187,13 @@ public partial class MainWindow
 
         if (isFiducial) RefreshFiducialTable();
         else if (isRelative) RefreshTieTable();
-        else if (isModel) RefreshModelTable();
+        else if (isModel)
+        {
+            RefreshModelTable();
+            // 模型交会的按钮是"能不能求"的闸门，它随刺点变化——刺完一个点就得重算，
+            // 否则按钮会一直停在做完上一次解算（或刚切进模块）时的状态，看着像"点了没反应"。
+            UpdateModelPanel();
+        }
         else RefreshGcpTable();
     }
 
