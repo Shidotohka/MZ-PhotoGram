@@ -248,6 +248,18 @@ public static class ProjectFile
             project.ControlPointZoomDirectoryFullPath = Directory.Exists(full) ? full : null;
         }
 
+        // `models` 在 2026-11-07 之后不再存盘（模型点是解算的中间产物，见 Docs/小项与取舍.md X-02）。
+        // 空数组不吭声——那是我们自己以前写出来的常态；但**非空**的要说一句：
+        // 那里面是手写进去的东西，下一次保存就真没有了，不能让人以为它还在。
+        if (dto.Extra?.TryGetValue("models", out var legacyModels) == true &&
+            legacyModels.ValueKind == System.Text.Json.JsonValueKind.Array &&
+            legacyModels.GetArrayLength() > 0)
+        {
+            project.LoadWarnings.Add(
+                $"文件里有 {legacyModels.GetArrayLength()} 条 models 记录：模型点已不再存盘，" +
+                "这段被忽略（下次保存就没了）。");
+        }
+
         foreach (var c in dto.Cameras ?? new List<CameraDto>())
         {
             var camera = new Camera
@@ -473,6 +485,13 @@ public static class ProjectFile
         public List<GcpDto>? Gcps { get; set; }
         public List<TiePointDto>? TiePoints { get; set; }
         public List<PairDto>? Pairs { get; set; }
+
+        /// <summary>
+        /// 认不出来的键。只为一件事存在：把<b>自己曾经写过、后来删掉</b>的键认出来并说一声
+        /// （现在是 `models`）。别的未知键一律静默忽略——手写文件里加个实验字段是合法的（§10）。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
     }
 
     private sealed class CameraDto

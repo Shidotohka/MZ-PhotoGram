@@ -3271,6 +3271,19 @@ internal static class Program
             !json.Contains("\"models\"", StringComparison.Ordinal),
             "模型点是一次解算的中间产物，不落盘");
 
+        // 旧文件里真带着一条模型记录（只可能来自手写）：不能崩，也不能悄悄丢。
+        var legacyPath = Path.Combine(Path.GetTempPath(), "pgm-legacy-models.pht");
+        var legacyJson = json.TrimEnd();
+        legacyJson = legacyJson[..legacyJson.LastIndexOf('}')] +
+                     ",\n  \"models\": [ { \"id\": \"M01\", \"gcpIds\": [\"6157\"] } ]\n}";
+        File.WriteAllText(legacyPath, legacyJson);
+        var legacy = ProjectFile.Load(legacyPath);
+        File.Delete(legacyPath);
+        Check("旧文件里的非空 models 被忽略，但会说出来",
+            legacy.LoadWarnings.Any(w => w.Contains("models", StringComparison.Ordinal)),
+            legacy.LoadWarnings.FirstOrDefault(w => w.Contains("models", StringComparison.Ordinal))
+            ?? "（没有警告——静默丢数据）");
+
         Check("读回：同名点与绑定关系",
             reloaded.TiePoints.Count == nPoints + 1 &&
             reloaded.Images.Sum(i => i.Points.Count(p => p.BoundTiePointId is not null)) == 2 * nPoints + 1 &&
