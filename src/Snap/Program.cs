@@ -77,6 +77,14 @@ internal static class Program
             return;
         }
 
+        // 离线分析一个 .pht：不解图、不开窗口，直接从工程里存的像点算一遍，
+        // 把「平面 / 高程」拆开报出来——界面上只有三维合量，看不出问题在哪一头。
+        if (Get(args, "--analyze") is { } analyzePath)
+        {
+            AnalyzeProject(analyzePath);
+            return;
+        }
+
         var outPath = Get(args, "--out") ?? "shot.png";
         var module = Get(args, "--module");
         var imagePath = Get(args, "--image");
@@ -1544,6 +1552,132 @@ internal static class Program
     /// <para>造 8 个控制点（后 2 个是检查点），按已知外方位投影成两片上的刺点，
     /// 然后切到「绝对定向」按一次解算——走的是界面真正的按钮路径，不是另开一个口子。</para>
     /// </summary>
+    /// <summary>
+    /// 离线分析一个 <c>.pht</c>：不开窗口、不解码影像，直接拿工程里存着的
+    /// 「像点 + 相对定向 + 控制点」重算模型交会与绝对定向。
+    ///
+    /// <para>为什么要有它：界面上的结果页只给三维合量的 rms，而交会角小的时候高程误差被
+    /// $H/B$ 放大，平面与高程能差一个量级——数字拆开才看得出瓶颈在哪。</para>
+    /// </summary>
+    private static void AnalyzeProject(string path)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        if (!File.Exists(path))
+        {
+            Console.WriteLine($"找不到工程文件：{path}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var project = ProjectFile.Load(path);
+
+        Console.WriteLine($"工程分析　{Path.GetFileName(path)}");
+        Console.WriteLine(new string('=', 78));
+
+        // ---- 影像与内方位 ----
+        foreach (var image in project.Images)
+        {
+            var io = image.Interior;
+            Console.WriteLine($"  {image.Id}　{image.Width}×{image.Height} px　" +
+                (io is { IsValid: true }
+                    ? $"f {io.FocalLength:0.###} mm　δ {io.PixelSizeMm * 1000:0.###} µm（{io.PixelSizeMm:0.000000} mm/px）　x0 {io.X0:+0.0000;-0.0000} y0 {io.Y0:+0.0000;-0.0000} mm"
+                    : "无内方位"));
+        }
+
+        Console.WriteLine($"  控制点 {project.Gcps.Count} 个（检查点 {project.Gcps.Count(g => g.Type == GcpType.CheckPoint)} 个）" +
+                          $"　同名点 {project.TiePoints.Count} 对");
+
+        var pair = project.Pairs.FirstOrDefault(p => p.Relative is not null);
+        if (pair is null)
+        {
+            Console.WriteLine("\n没有解过相对定向的像对，后面的算不了。");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine($"\n  像对 {pair.LeftImageId} × {pair.RightImageId}");
+        var rel = pair.Relative!;
+        Console.WriteLine($"  相对定向　b=({rel.Bx:+0.0000000;-0.0000000}, {rel.By:+0.0000000;-0.0000000}, {rel.Bz:+0.0000000;-0.0000000})" +
+                          $"　φ {rel.Phi2:+0.0000;-0.0000}° ω {rel.Omega2:+0.0000;-0.0000}° κ {rel.Kappa2:+0.0000;-0.0000}°");
+        Console.WriteLine($"  　　　　　q_rms {rel.RmsQ:0.0000} mm　σ₀ {rel.Sigma0Mm:0.0000} mm　{rel.UsedCount} 对参与");
+
+        // ---- 模型交会 ----
+        var model = ModelIntersectionTask.Run(project, pair);
+        if (!model.Success)
+        {
+            Console.WriteLine($"\n模型交会失败：{model.Failure}　{model.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var worst = model.Observations.Min(o => o.ConvergenceAngleDeg);
+        var depth = model.Observations.Average(o => Math.Abs(o.Model.Z));
+        Console.WriteLine($"\n  模型交会　{model.Observations.Count} 个点（检查点 {model.Observations.Count(o => o.Type == GcpType.CheckPoint)}）" +
+                          $"　最差交会角 {worst:0.00}°");
+        foreach (var w in model.Skipped.Take(8)) Console.WriteLine($"    跳过 {w}");
+        if (model.Skipped.Count > 8) Console.WriteLine($"    跳过…共 {model.Skipped.Count} 个");
+
+        foreach (var o in model.Observations)
+        {
+            Console.WriteLine($"    {o.GcpId,-6} 模型 ({o.Model.X:+0.0000;-0.0000}, {o.Model.Y:+0.0000;-0.0000}, {o.Model.Z:+0.0000;-0.0000})" +
+                              $"　交会角 {o.ConvergenceAngleDeg:0.00}°");
+        }
+
+        // ---- 绝对定向 ----
+        var run = AbsoluteOrientationTask.Run(project, pair);
+        if (!run.Success)
+        {
+            Console.WriteLine($"\n绝对定向失败：{run.Failure}　{run.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var r = run.Result!;
+        Console.WriteLine($"\n  绝对定向　λ {r.Scale:0.000000} m（模型单位 → 米）");
+        Console.WriteLine($"  　　　　　φ {r.PhiDeg:+0.0000;-0.0000}° ω {r.OmegaDeg:+0.0000;-0.0000}° κ {r.KappaDeg:+0.0000;-0.0000}°" +
+                          $"　平移 ({r.X0:0.000}, {r.Y0:0.000}, {r.Z0:0.000}) m");
+        Console.WriteLine($"  　　　　　不平值 rms {r.Rms:0.0000} m　平面 Δxy {run.RmsXy:0.0000} m　高程 Δz {run.RmsZ:0.0000} m" +
+                          $"　σ₀ {r.Sigma0:0.0000} m");
+        Console.WriteLine($"  　　　　　深度放大 H/B {run.DepthAmplification:0.000}　地面采样 {run.GroundSampleDistance:0.0000} m/px" +
+                          $"　σ₀ 折 {r.Sigma0 / run.GroundSampleDistance:0.00} px");
+        Console.WriteLine($"  　　　　　参与 {run.Used.Count}　检查点 {run.Checks.Count}　多余观测 {r.Redundancy}" +
+                          (r.Singular.Count >= 3 && r.Singular[0] > 0
+                              ? $"　σ₃/σ₁ {r.Singular[2] / r.Singular[0]:0.0E+0}"
+                              : ""));
+
+        Console.WriteLine();
+        Console.WriteLine($"  {"点号",-8}{"Δxy (m)",12}{"Δz (m)",12}{"|v| (m)",12}{"v/σ₀",9}");
+        foreach (var o in run.Used)
+        {
+            var t = r.Transform(o.Model);
+            var g = GroundAxes.ToMathFrame(o.Ground, run.GroundOrder);
+            var dxy = Math.Sqrt((t.X - g.X) * (t.X - g.X) + (t.Y - g.Y) * (t.Y - g.Y));
+            var dz = t.Z - g.Z;
+            var ratio = r.Sigma0 > 0 ? o.ResidualLength / r.Sigma0 : double.NaN;
+            Console.WriteLine($"  {o.GcpId,-8}{dxy,12:0.0000}{dz,12:+0.0000;-0.0000}{o.ResidualLength,12:0.0000}{ratio,9:0.00}");
+        }
+        foreach (var c in run.Checks)
+        {
+            var t = c.Transformed ?? r.Transform(c.Model);
+            var g = GroundAxes.ToMathFrame(c.Ground, run.GroundOrder);
+            var dxy = Math.Sqrt((t.X - g.X) * (t.X - g.X) + (t.Y - g.Y) * (t.Y - g.Y));
+            Console.WriteLine($"  {c.GcpId,-8}{dxy,12:0.0000}{t.Z - g.Z,12:+0.0000;-0.0000}{"—",12}{"检查点",9}");
+        }
+
+        foreach (var w in run.Warnings) Console.WriteLine($"  ! {w}");
+
+        // 一句结论：把瓶颈指名道姓地说出来
+        var gsd = run.GroundSampleDistance;
+        if (!double.IsNaN(gsd) && gsd > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"  结论：平面 {run.RmsXy / gsd:0.00} px、高程 {run.RmsZ / gsd:0.00} px" +
+                              $"（$\\sigma_0$ {r.Sigma0 / gsd:0.00} px，判据 ≤ 10 px）；" +
+                              $"深度被 H/B = {run.DepthAmplification:0.0} 放大。");
+        }
+    }
+
     private static void RunAbsoluteDemo(MainWindow win)
     {
         Console.WriteLine("\n绝对定向界面端到端─────────────────────────────────────");
