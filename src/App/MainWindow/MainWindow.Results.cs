@@ -423,10 +423,28 @@ public partial class MainWindow
         table.Num("平移", "Y₀", r.Y0, "0.000", "m");
         table.Num("平移", "Z₀", r.Z0, "0.000", "m");
 
-        var limit = 2.0 * r.Sigma0;
-        table.Num("控制点不符值", "rms", r.Rms, "0.0000", "m",
-            $"验收 2σ₀ = {Fmt(limit, "0.0000")} m", r.Rms > limit);
-        table.Num("单位权中误差", "σ₀", r.Sigma0, "0.0000", "m");
+        // 平面 / 高程分开：交会角小的时候高程误差被 H/B 放大，两者能差一个量级。
+        // 只报三维合量，2.4 m 看着像"整片都不准"，其实平面可能只有 0.4 m。
+        var gsd = run.GroundSampleDistance;
+        string AsPixel(double metres) =>
+            double.IsNaN(gsd) || gsd <= 0 ? "" : $"{metres / gsd:0.00} px";
+        var sigmaPx = double.IsNaN(gsd) || gsd <= 0 ? double.NaN : r.Sigma0 / gsd;
+
+        table.Num("不符值（平面）", "Δxy", run.RmsXy, "0.0000", "m",
+            double.IsNaN(gsd) ? "像点精度就该在这个量级" : $"折 {AsPixel(run.RmsXy)}，像点精度就该在这个量级");
+        table.Num("不符值（高程）", "Δz", run.RmsZ, "0.0000", "m",
+            double.IsNaN(run.DepthAmplification)
+                ? "小交会角下这一项会被放大"
+                : $"深度放大 H/B = {run.DepthAmplification:0.0} 倍");
+        table.Num("控制点不符值", "rms", r.Rms, "0.0000", "m", "三维合量");
+
+        // 判据：σ₀ 折算成像元，与后方交会的 VL-10（σ₀ ≤ 10δ）同一条规矩。
+        // 旧的「验收 2σ₀」永远成立：rms/σ₀ = √((3n−7)/n) ≤ √3 < 2，对任何点数都判绿，是块装饰。
+        table.Num("单位权中误差", "σ₀", r.Sigma0, "0.0000", "m",
+            double.IsNaN(sigmaPx)
+                ? ""
+                : $"{sigmaPx:0.00} px　判据 ≤ 10 px",
+            !double.IsNaN(sigmaPx) && sigmaPx > 10.0);
         table.Num("最大不符值", "max", r.MaxAbsResidual, "0.0000", "m");
         table.Add("参与 / 检查点", "—", $"{run.Used.Count} / {run.Checks.Count}", "个",
             $"多余观测 {r.Redundancy}");

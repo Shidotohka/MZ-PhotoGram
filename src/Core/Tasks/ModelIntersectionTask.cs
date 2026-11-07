@@ -69,6 +69,12 @@ public sealed class ModelIntersectionOutcome
     /// <summary>判手性的证据：用的哪三点、两侧正弦、投票数。控制点不足 3 个时判不出。</summary>
     public GroundOrderEvidence? Evidence { get; init; }
 
+    /// <summary>像对的主距，mm。绝对定向用它把「米」折算成「像元」。</summary>
+    public double FocalLengthMm { get; init; } = double.NaN;
+
+    /// <summary>像元尺寸，mm/px。同上。</summary>
+    public double PixelSizeMm { get; init; } = double.NaN;
+
     public bool Success => Failure == ModelIntersectionFailure.None;
 
     /// <summary>能参与绝对定向的点数（检查点不算）。</summary>
@@ -240,6 +246,8 @@ public static class ModelIntersectionTask
             IsModelCoordinates = geometry.IsModelCoordinates,
             GroundOrder = order,
             Evidence = evidence,
+            FocalLengthMm = focal,
+            PixelSizeMm = ioLeft.PixelSizeMm,
         };
     }
 

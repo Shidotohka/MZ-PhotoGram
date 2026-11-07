@@ -1617,6 +1617,20 @@ internal static class Program
             ? "[PASS] 不符值表的列头是点号"
             : $"[FAIL] 不符值表列头是「{header}」");
 
+        // 平面/高程拆开 + 判据换成像素：这两行是这次加的，得在真的结果页上看到
+        var hasSplit = names.Contains("不符值（平面）") && names.Contains("不符值（高程）");
+        Console.WriteLine(hasSplit
+            ? "[PASS] 结果页把平面与高程分开列了"
+            : $"[FAIL] 没找到平面的那两行：元素=[{string.Join("/", names)}]");
+        if (!hasSplit) Environment.ExitCode = 1;
+
+        var sigmaRow = panel.Items.FirstOrDefault(i => i.Symbol == "σ₀");
+        var gateOk = sigmaRow is not null && sigmaRow.Note.Contains("px") && sigmaRow.Note.Contains("判据");
+        Console.WriteLine(gateOk
+            ? $"[PASS] σ₀ 的判据折成像元　{sigmaRow!.Note}"
+            : $"[FAIL] σ₀ 那行没有像素判据：[{sigmaRow?.Note}]");
+        if (!gateOk) Environment.ExitCode = 1;
+
         CheckProcessInfo(win, "绝对定向");
     }
     /// <summary>
@@ -2518,6 +2532,31 @@ internal static class Program
 
         Check("多余观测数 = 3n − 7", run.Result.Redundancy == 3 * 6 - 7,
             $"r = {run.Result.Redundancy}");
+
+        // ---- 3a 平面 / 高程拆开 ----
+        // 三维合量的平方必须等于两个分量平方之和（逐点 |v|² = Δx²+Δy²+Δz²），
+        // 这条恒等式一验，就知道拆分不是另算了一套残差。
+        var split = run.RmsXy * run.RmsXy + run.RmsZ * run.RmsZ;
+        var whole = run.Result.Rms * run.Result.Rms;
+        Check("平面 + 高程的平方和等于三维合量",
+            Math.Abs(split - whole) < 1e-9 * Math.Max(1.0, whole),
+            $"Δxy {run.RmsXy:0.0000} m　Δz {run.RmsZ:0.0000} m　合量² 差 {split - whole:+0.0E+0;-0.0E+0}");
+
+        // 本布景：航高 2000 m、基线 1000 m ⇒ H/B ≈ 2，所以深度放大倍数该是 2 左右。
+        // 注意这里 Δz/Δxy 并不等于 H/B：合成像对的射线无噪声，误差只来自像元量化，
+        // 平面与高程被量化摊平了。真实刺点数据的分量关系才由交会角决定。
+        Check("深度放大倍数 = H/B ≈ 2，且高程不比平面好",
+            run.RmsZ > run.RmsXy && Math.Abs(run.DepthAmplification - 2.0) < 0.35,
+            $"H/B = {run.DepthAmplification:0.00}　Δz {run.RmsZ:0.0000} / Δxy {run.RmsXy:0.0000} m");
+
+        // GSD = H·δ/f；这里的 H 是 λ·|Z_model|（模型以基线长为单位）
+        Check("地面采样间隔算得对（0.59 m/px）",
+            Math.Abs(run.GroundSampleDistance - 0.590) < 0.02,
+            $"{run.GroundSampleDistance:0.0000} m/px");
+
+        var sigmaPx = run.Result.Sigma0 / run.GroundSampleDistance;
+        Check("σ₀ 折算成像元后远小于 10 px 的判据", sigmaPx < 10.0 && sigmaPx > 0.05,
+            $"{sigmaPx:0.00} px（{run.Result.Sigma0:0.000} m）");
 
         // ---- 3b 地面文件写成左手系（X/Y 互换）----
         // 判据不是"再解一次比残差"，而是模型交会里直接调的后方交会那个三点叉乘。

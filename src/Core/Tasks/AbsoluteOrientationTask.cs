@@ -65,6 +65,11 @@ public sealed class AbsoluteOrientationPreparation
     /// <summary>判手性的证据，供界面/报告引用；控制点不足 3 个时为空。</summary>
     public GroundOrderEvidence? Evidence { get; init; }
 
+    /// <summary>像对的主距与像元尺寸，用来把地面上的「米」折算成「像元」。缺内方位时为 NaN。</summary>
+    public double FocalLengthMm { get; init; } = double.NaN;
+
+    public double PixelSizeMm { get; init; } = double.NaN;
+
     public int Count => Observations.Count;
 
     public bool Ready => Failure == AbsoluteOrientationFailure.None;
@@ -142,6 +147,30 @@ public sealed class AbsoluteOrientationRun
             return worst;
         }
     }
+
+    /// <summary>
+    /// 控制点不符值的<b>平面</b>分量 RMS：$\sqrt{\sum(\Delta x^2+\Delta y^2)/n}$，与地面坐标同单位。
+    ///
+    /// <para>为什么必须单列：交会角小时高程误差被 $H/B$ 放大，平面和高程能差一个量级。
+    /// 只报三维合量（<see cref="AbsoluteOrientationResult.Rms"/>）等于把这件事埋掉——
+    /// 一个 2.4 m 的合量看起来像"整片都不准"，拆开才发现平面只有 0.4 m。</para>
+    /// </summary>
+    public double RmsXy { get; init; } = double.NaN;
+
+    /// <summary>控制点不符值的高程分量 RMS：$\sqrt{\sum\Delta z^2/n}$。</summary>
+    public double RmsZ { get; init; } = double.NaN;
+
+    /// <summary>
+    /// 地面采样间隔，m/px：$H\delta/f$，其中 $H=\lambda\,|Z_{\text{model}}|$（模型以基线为单位，
+    /// 所以 $|Z|$ 就是"景深有几个基线"）。缺内方位时为 NaN。
+    /// </summary>
+    public double GroundSampleDistance { get; init; } = double.NaN;
+
+    /// <summary>
+    /// 深度放大倍数 $H/B$。模型坐标以基线为单位时它就等于平均 $|Z_{\text{model}}|$。
+    /// 平面误差乘上它才是高程误差——这是小交会角像对的"罪证数字"。
+    /// </summary>
+    public double DepthAmplification { get; init; } = double.NaN;
 }
 
 /// <summary>
@@ -203,6 +232,8 @@ public static class AbsoluteOrientationTask
             IsModelCoordinates = model.IsModelCoordinates,
             GroundOrder = model.GroundOrder,
             Evidence = model.Evidence,
+            FocalLengthMm = model.FocalLengthMm,
+            PixelSizeMm = model.PixelSizeMm,
         };
     }
 
@@ -271,6 +302,28 @@ public static class AbsoluteOrientationTask
             checksTransformed.Add(c with { Transformed = solution.Transform(c.Model) });
         }
 
+        // 平面与高程分开统计：两者的精度差一个 H/B，合成一个数就把差异藏起来了。
+        // 逐轴不符值直接从 Transform 里取，不必再下到 ABI 去要 residual_xyz。
+        double sumXy = 0.0, sumZ = 0.0;
+        foreach (var o in used)
+        {
+            var t = solution.Transform(o.Model);
+            var g = GroundAxes.ToMathFrame(o.Ground, prep.GroundOrder);
+            var dx = t.X - g.X;
+            var dy = t.Y - g.Y;
+            sumXy += dx * dx + dy * dy;
+            sumZ += (t.Z - g.Z) * (t.Z - g.Z);
+        }
+
+        var rmsXy = used.Count > 0 ? Math.Sqrt(sumXy / used.Count) : double.NaN;
+        var rmsZ = used.Count > 0 ? Math.Sqrt(sumZ / used.Count) : double.NaN;
+
+        // 模型以基线为单位，所以 |Z_model| 直接就是"景深有几个基线"，也就是 H/B
+        var depth = used.Count > 0 ? used.Average(o => Math.Abs(o.Model.Z)) : double.NaN;
+        var gsd = !double.IsNaN(depth) && prep.FocalLengthMm > 0 && prep.PixelSizeMm > 0
+            ? solution.Scale * depth * prep.PixelSizeMm / prep.FocalLengthMm
+            : double.NaN;
+
         if (solution.MirrorSuspected)
         {
             warnings.Add(prep.Evidence is { Decided: true }
@@ -310,6 +363,10 @@ public static class AbsoluteOrientationTask
             Warnings = warnings,
             PairLabel = prep.PairLabel,
             GroundOrder = prep.GroundOrder,
+            RmsXy = rmsXy,
+            RmsZ = rmsZ,
+            GroundSampleDistance = gsd,
+            DepthAmplification = depth,
         };
     }
 
