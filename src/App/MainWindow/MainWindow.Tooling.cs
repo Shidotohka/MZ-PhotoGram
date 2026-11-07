@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using Photogrammetry.Core;
 
@@ -33,6 +34,13 @@ public partial class MainWindow
 
     /// <summary>「求模型点」按钮现在能不能点。Snap 用它验按钮状态随刺点刷新。</summary>
     internal bool ModelSolveEnabled => ModelSolveButton?.IsEnabled == true;
+
+    /// <summary>
+    /// 同时发起两次载入（模拟"两张片几乎同时拖进来"），用来验载入串行闸：
+    /// 两张必须落进两个不同的视窗，且右栏状态是两者都在。
+    /// </summary>
+    internal Task LoadTwoImagesTogetherForTooling(ImageItem a, ImageItem b) =>
+        Task.WhenAll(LoadItemAsync(a), LoadItemAsync(b));
 
     /// <summary>
     /// 在<b>模型交会表</b>里选中一行并改成检查点 / 控制点，走的就是右键菜单那两个处理器。

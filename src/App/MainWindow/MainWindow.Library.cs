@@ -96,16 +96,32 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>
+    /// 载入影像的唯一串行闸。拖放是"发出去就不管"的（<c>_ = LoadItemAsync(...)</c>），
+    /// 两张片几乎同时拖进来时，两个解码会并行：先完成的那个把 <c>SetBusy</c> 关掉，
+    /// 进度条消失了第二张却还在解码；落位顺序也可能挤到同一个视窗。
+    /// 串行之后这两件事都不会发生——一次只放一张。
+    /// </summary>
+    private readonly System.Threading.SemaphoreSlim _loadGate = new(1, 1);
+
     /// <summary>把影像载入工作区；target 为空则放进下一个可用视窗。</summary>
     private async Task LoadItemAsync(ImageItem item, ImageView? target = null)
     {
-        var source = await EnsureBitmapAsync(item);
-        if (source is null) return;
+        await _loadGate.WaitAsync();
+        try
+        {
+            var source = await EnsureBitmapAsync(item);
+            if (source is null) return;
 
-        if (target is null) Workspace.LoadImage(source, item);
-        else Workspace.LoadInto(target, source, item);
+            if (target is null) Workspace.LoadImage(source, item);
+            else Workspace.LoadInto(target, source, item);
 
-        RefreshTree();
+            RefreshTree();
+        }
+        finally
+        {
+            _loadGate.Release();
+        }
     }
 
     /// <summary>
@@ -150,10 +166,25 @@ public partial class MainWindow
         UpdateZoomLabel();
         OnSelectionChanged(null, EventArgs.Empty);
 
-        // 切到另一张影像，「本片」列与可解算点数都要跟着变
+        // 换了影像，本模块的「还缺什么、能不能解」全变了：点表与右栏都得跟着刷新。
+        // 只刷点表（下面那句 RefreshPointTable）会出现这样的现象：下方表格更新了，
+        // 右栏还停在上一张影像的状态，按钮该亮的没亮——点了自然没反应。
         RefreshPointTable();
-        UpdateResectionPanel();
-        if (_moduleName == "前方交会") UpdateIntersectionPanel();
+        UpdateModulePanels();
+    }
+
+    /// <summary>按当前模块刷新右栏那张「任务参数」卡。换影像、改类型之后都要过一遍。</summary>
+    private void UpdateModulePanels()
+    {
+        switch (_moduleName)
+        {
+            case "后方交会": UpdateResectionPanel(); break;
+            case "相对定向": UpdateRelativePanel(); break;
+            case "模型交会": UpdateModelPanel(); break;
+            case "绝对定向": UpdateAbsolutePanel(); break;
+            case "前方交会": UpdateIntersectionPanel(); break;
+            default: UpdateResectionPanel(); break;
+        }
     }
 
 }

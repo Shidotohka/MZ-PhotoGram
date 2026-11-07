@@ -302,6 +302,13 @@ internal static class Program
             Pump(win);
         }
 
+        // 双图状态探针：两张片都在双图里时，来回切模块后它们还在不在、右栏状态跟不跟
+        if (args.Any(a => string.Equals(a, "--view-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            ViewTest(win);
+            Pump(win);
+        }
+
         // M3：载入真实控制点 → 按已知外方位反算像素位置刺点 → 解算后方交会 → 截图
         if (Get(args, "--gcp") is { } gcpFile)
         {
@@ -1552,6 +1559,94 @@ internal static class Program
     /// <para>造 8 个控制点（后 2 个是检查点），按已知外方位投影成两片上的刺点，
     /// 然后切到「绝对定向」按一次解算——走的是界面真正的按钮路径，不是另开一个口子。</para>
     /// </summary>
+    /// <summary>
+    /// 双图状态探针：两张片放进左右窗之后，来回切一次模块，看影像还在不在、右栏跟不跟。
+    /// 用来复现「拖进第二张后右栏不更新」「切走再回来第二张不见了」这类操作问题。
+    /// </summary>
+    private static void ViewTest(MainWindow win)
+    {
+        Console.WriteLine("\n双图状态探针───────────────────────────────────────────");
+
+        var ws = FindChild<ImageWorkspace>(win);
+        if (ws is null)
+        {
+            Console.WriteLine("[FAIL] 找不到工作区");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        var afterLoad = Snapshot();
+        Check("拖进来的两张片都在可见视窗里",
+            afterLoad.Count == 2 && afterLoad.All(v => v.HasImage),
+            string.Join("　", afterLoad.Select(v => $"{v.Name}={v.Id}")));
+
+        var pairText = (win.FindName("RelativePairText") as TextBlock)?.Text ?? "";
+        var loadedIds = afterLoad.Select(v => v.Id).ToList();
+        Check("右栏已经显示了两片（不是停在拖之前的状态）",
+            loadedIds.All(id => id != "—" && pairText.Contains(id)),
+            pairText.Replace("\n", " | "));
+
+        // 来回切一次模块
+        win.SelectModuleForTooling("内定向");
+        Pump(win);
+        win.SelectModuleForTooling("相对定向");
+        Pump(win);
+
+        var afterRound = Snapshot();
+        Check("切走再切回来，两张片还在",
+            afterRound.Count == 2 && afterRound.All(v => v.HasImage),
+            string.Join("　", afterRound.Select(v => $"{v.Name}={v.Id}")));
+
+        Check("切回来之后右栏仍然显示两片",
+            ((win.FindName("RelativePairText") as TextBlock)?.Text ?? "").Replace("\n", " | ") ==
+            pairText.Replace("\n", " | "),
+            (win.FindName("RelativePairText") as TextBlock)?.Text?.Replace("\n", " | ") ?? "");
+
+        // ---- 并发载入：两张片几乎同时进来（拖放是 fire-and-forget，最容易在这里翻车）----
+        var items = ws.VisibleViews().Select(v => v.Image).OfType<ImageItem>().ToList();
+        // --image 那条路只写 RelativePath；并发载入要解码，必须补 FullPath
+        foreach (var it in items)
+        {
+            if (it.FullPath is null && it.RelativePath is { } rel) it.FullPath = Path.GetFullPath(rel);
+        }
+        if (items.Count == 2)
+        {
+            Console.WriteLine($"  并发载入：{items[0].Id}(path={items[0].FullPath ?? "null"})　" +
+                              $"{items[1].Id}(path={items[1].FullPath ?? "null"})");
+            ws.Reset();
+            Pump(win);
+
+            var load = win.LoadTwoImagesTogetherForTooling(items[0], items[1]);
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (!load.IsCompleted && DateTime.UtcNow < deadline)
+            {
+                Pump(win);
+                System.Threading.Thread.Sleep(20);
+            }
+
+            Console.WriteLine($"  任务 {load.Status}　异常 {load.Exception?.GetBaseException().Message ?? "无"}");
+            var afterRace = Snapshot();
+            Check("两张片同时载入也各占一个视窗（载入串行闸）",
+                afterRace.Count == 2 && afterRace.All(v => v.HasImage) &&
+                afterRace.Select(v => v.Id).Distinct().Count() == 2,
+                string.Join("　", afterRace.Select(v => $"{v.Name}={v.Id}")));
+        }
+
+        Console.WriteLine();
+        Console.WriteLine(failures == 0 ? "VIEW PASS" : $"VIEW FAIL（{failures} 项）");
+        if (failures != 0) Environment.ExitCode = 1;
+
+        List<(string Name, bool HasImage, string Id)> Snapshot() =>
+            ws.VisibleViews().Select(v => (v.GetType().Name, v.HasImage, v.Image?.Id ?? "—")).ToList();
+    }
+
     /// <summary>
     /// 离线分析一个 <c>.pht</c>：不开窗口、不解码影像，直接拿工程里存着的
     /// 「像点 + 相对定向 + 控制点」重算模型交会与绝对定向。

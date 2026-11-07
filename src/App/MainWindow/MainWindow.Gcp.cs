@@ -526,8 +526,7 @@ public partial class MainWindow
 
         gcp.Type = type;
         RefreshPointTable();
-        if (_moduleName == "绝对定向") UpdateAbsolutePanel();
-        else UpdateResectionPanel();
+        UpdateModulePanels();
 
         DiagSummary.Text = type == GcpType.CheckPoint
             ? $"{gcp.Id} 已设为检查点，不参与解算（只用来独立检核）"
