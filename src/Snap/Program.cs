@@ -287,6 +287,13 @@ internal static class Program
             }
         }
 
+        // 参数式内定向的微米输入：界面填 µm，落库必须是 mm/px
+        if (args.Any(a => string.Equals(a, "--interior-um", StringComparison.OrdinalIgnoreCase)))
+        {
+            CheckInteriorMicrons(win);
+            Pump(win);
+        }
+
         // M3：载入真实控制点 → 按已知外方位反算像素位置刺点 → 解算后方交会 → 截图
         if (Get(args, "--gcp") is { } gcpFile)
         {
@@ -2599,9 +2606,61 @@ internal static class Program
         }
     }
 
-    private static void RelativeCheck()
+    /// <summary>
+    /// 参数式内定向的<b>微米输入</b>：面板按厂家手册填 6.000 µm，落库必须是 0.006 mm/px，
+    /// 并且「输入检查」卡上要同时看到两种单位、不再要求相机检校文件。
+    /// </summary>
+    private static void CheckInteriorMicrons(MainWindow win)
     {
-        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Console.WriteLine("\n参数式内定向：微米输入───────────────────────────────────");
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        var view = FindChild<ImageWorkspace>(win)?.VisibleViews().FirstOrDefault(v => v.HasImage);
+        if (view?.Image is not { } image)
+        {
+            Console.WriteLine("[FAIL] 先给 --image 一张影像");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        win.SelectModuleForTooling("内定向");
+        Pump(win);
+
+        // 这正是 UltraCam Xp 手册上那组数：f 100.500 mm、δ 6.000 µm、主点 (0.000, 0.120) mm
+        win.ApplyParametricForTooling("100.500", "0.000", "0.120", "6.000");
+
+        var io = image.Interior;
+        Check("填 6.000 µm 落库为 0.006 mm/px",
+            io is not null && Math.Abs(io.PixelSizeMm - 0.006) < 1e-12,
+            io is null ? "没有写入内方位" : $"PixelSizeMm = {io.PixelSizeMm:R}");
+
+        if (io is not null)
+        {
+            var step = CoordinateConverter.PixelToImagePlane(
+                new ImagePixel(image.Width / 2 + 1, image.Height / 2), io, image.Width, image.Height);
+            Check("一个像元的像平面步长 = 0.006 mm", Math.Abs(step.X - 0.006) < 1e-12,
+                $"x(中心右侧 1 像元) = {step.X:R} mm");
+        }
+
+        var text = win.CheckSummaryText;
+        Check("「输入检查」不再要求相机检校文件", !text.Contains("未载入相机检校文件"),
+            text.Replace("\n", " | "));
+        Check("「输入检查」里两种单位都给了",
+            text.Contains("µm") && text.Contains("mm/px"), text.Replace("\n", " | "));
+
+        Console.WriteLine();
+        Console.WriteLine(failures == 0 ? "INTERIOR-UM PASS" : $"INTERIOR-UM FAIL（{failures} 项）");
+        if (failures != 0) Environment.ExitCode = 1;
+    }
+
+    private static void RelativeCheck()
+    {        Console.OutputEncoding = System.Text.Encoding.UTF8;
 
         var failures = 0;
         void Check(string name, bool ok, string detail)

@@ -407,9 +407,7 @@ public partial class MainWindow
         if (!run.Success)
         {
             ShowResult(FailTable($"相对定向 · {left?.Id ?? "—"} → {right?.Id ?? "—"}", run.Message));
-            LogSolve("相对定向", $"{left?.Id ?? "—"} → {right?.Id ?? "—"}", false, run.Message);
-            DiagSummary.Text = "✗ " + run.Message;
-            DiagSummary.Foreground = ErrBadge;
+            GateBlocked("相对定向", run.Message);
             return run;
         }
 

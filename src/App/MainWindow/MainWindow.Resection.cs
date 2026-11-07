@@ -70,7 +70,8 @@ public partial class MainWindow
             SetBusy(false, null);
         }
 
-        if (run.Failure != ResectionFailure.None)
+        if (run.Failure != ResectionFailure.None && run.Failure != ResectionFailure.NoImage &&
+            run.Failure != ResectionFailure.NoInterior && run.Failure != ResectionFailure.NotEnoughPoints)
             LogSolve("后方交会", CurrentImage?.Id ?? "—", false, run.Message);
 
         switch (run.Failure)
@@ -82,8 +83,7 @@ public partial class MainWindow
 
             case ResectionFailure.NoInterior:
             case ResectionFailure.NotEnoughPoints:
-                DiagSummary.Text = "✗ " + run.Message;
-                DiagSummary.Foreground = ErrBadge;
+                GateBlocked("后方交会", run.Message);
                 return null;
 
             case ResectionFailure.GroundOrderUnknown:

@@ -404,12 +404,16 @@
                                                          Padding="3,1"/>
                                             </DockPanel>
                                             <DockPanel Margin="0,2">
-                                                <TextBlock Text="δ (mm/px)" Width="66" FontSize="11.5"
+                                                <TextBlock Text="δ (µm)" Width="66" FontSize="11.5"
                                                            Foreground="{StaticResource DimBrush}"
                                                            VerticalAlignment="Center"/>
                                                 <TextBox x:Name="ParamPixel" FontSize="11.5" FontFamily="Consolas"
-                                                         Padding="3,1"/>
+                                                         Padding="3,1" TextChanged="PixelUm_TextChanged"/>
                                             </DockPanel>
+                                            <TextBlock x:Name="PixelHint" FontSize="10.5"
+                                                       Foreground="{StaticResource MutBrush}"
+                                                       Margin="66,0,0,0" TextWrapping="Wrap"
+                                                       Text="按厂家手册填微米，程序内部换成 mm/px"/>
                                             <Button Content="应用到当前影像" Click="ApplyParametric_Click"
                                                     Style="{StaticResource ToolBtn}"
                                                     HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
@@ -643,7 +647,7 @@
                                          Checked="BottomTab_Checked"/>
                             <RadioButton x:Name="ResTab" Content="结果残差" GroupName="Bottom" Tag="res"
                                          Style="{StaticResource BottomTab}" Checked="BottomTab_Checked"/>
-                            <RadioButton Content="日志" GroupName="Bottom" Tag="log"
+                            <RadioButton x:Name="BottomTabsLog" Content="日志" GroupName="Bottom" Tag="log"
                                          Style="{StaticResource BottomTab}" Checked="BottomTab_Checked"/>
                         </StackPanel>
                     </DockPanel>

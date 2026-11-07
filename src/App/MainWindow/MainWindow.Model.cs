@@ -91,9 +91,7 @@ public partial class MainWindow
         {
             _modelPoints = new Dictionary<string, ModelPointObservation>();
             ShowResult(FailTable($"模型交会 · {label}", outcome.Message));
-            LogSolve("模型交会", label, false, outcome.Message);
-            DiagSummary.Text = "✗ " + outcome.Message;
-            DiagSummary.Foreground = ErrBadge;
+            GateBlocked("模型交会", outcome.Message);
             RefreshModelTable();
             UpdateModelPanel();
             return outcome;

@@ -124,26 +124,29 @@ public partial class MainWindow
         }
 
         if (!TryRead(ParamF, out var f) || !TryRead(ParamX0, out var x0) ||
-            !TryRead(ParamY0, out var y0) || !TryRead(ParamPixel, out var pixel))
+            !TryRead(ParamY0, out var y0) || !TryRead(ParamPixel, out var pixelUm))
         {
             DiagSummary.Text = "! 内参必须都是数字（小数点用点，不要用逗号）";
             DiagSummary.Foreground = ErrBadge;
             return;
         }
 
-        if (f <= 0 || pixel <= 0)
+        if (f <= 0 || pixelUm <= 0)
         {
             DiagSummary.Text = "! 焦距与像元尺寸必须大于 0";
             DiagSummary.Foreground = ErrBadge;
             return;
         }
 
+        // 面板上按手册填微米，模型里一律存 mm/px——共线方程的 f 是毫米，两者必须同量纲
+        var pixelMm = pixelUm / 1000.0;
+
         image.Interior = new InteriorOrientation
         {
             FocalLength = f,
             X0 = x0,
             Y0 = y0,
-            PixelSizeMm = pixel,
+            PixelSizeMm = pixelMm,
         };
         image.Status = ImageStatus.InteriorDone;
 
@@ -151,8 +154,18 @@ public partial class MainWindow
         RefreshTree();
         UpdateFiducialUi();
 
-        DiagSummary.Text = $"✓ 已应用参数式内参：f = {f:0.###} mm，δ = {pixel:0.000000} mm/px";
+        DiagSummary.Text = $"✓ 已应用参数式内参：f = {f:0.###} mm，δ = {pixelUm:0.###} µm（{pixelMm:0.000000} mm/px）";
         DiagSummary.Foreground = OkBadge;
+    }
+
+    /// <summary>微米输入框边上实时给一句毫米换算，省得用户在两种单位之间心算。</summary>
+    private void PixelUm_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (PixelHint is null) return;
+
+        PixelHint.Text = TryRead((TextBox)sender, out var um) && um > 0
+            ? $"= {um / 1000.0:0.000000} mm/px"
+            : "按手册填微米";
     }
 
     private static bool TryRead(TextBox box, out double value) =>
@@ -464,7 +477,12 @@ public partial class MainWindow
         DiagSummary.Foreground = enough ? OkBadge : WarnBadge;
     }
 
-    /// <summary>输入检查：把当前影像做内定向还缺什么，逐条列出来。</summary>
+    /// <summary>
+    /// 输入检查：做内定向还缺什么。只出现在「内定向」模块里——别处不念内方位（各模块只显示各自的事）。
+    ///
+    /// <para>相机检校文件只是<b>两条路里的一条</b>（框标法）。内方位一旦齐了——不管参数式填的
+    /// 还是框标求的——它就是废话，所以「未载入相机检校文件」只在真的缺内方位时出现。</para>
+    /// </summary>
     private void UpdateCheckPanel()
     {
         if (CheckText is null) return;
@@ -477,13 +495,17 @@ public partial class MainWindow
             return;
         }
 
+        var hasInterior = image.Interior is { IsValid: true };
         var lines = new List<string>();
         var allOk = true;
 
         if (_camera is null)
         {
-            lines.Add("✗ 未载入相机检校文件");
-            allOk = false;
+            if (!hasInterior)
+            {
+                lines.Add("✗ 未载入相机检校文件（走框标法才需要；参数式直接填 f / x0 / y0 / δ 也行）");
+                allOk = false;
+            }
         }
         else if (!_camera.HasEnoughFiducials)
         {
@@ -507,7 +529,8 @@ public partial class MainWindow
         }
 
         if (image.Interior is { IsValid: true } io)
-            lines.Add($"✓ δ = {io.PixelSizeMm:0.000000} mm/px，x0 = {Format.Signed(io.X0, "0.0000")} mm");
+            lines.Add($"✓ δ = {io.PixelSizeMm * 1000.0:0.###} µm（{io.PixelSizeMm:0.000000} mm/px），" +
+                      $"x0 = {Format.Signed(io.X0, "0.0000")} mm");
         else
             allOk = false;
 

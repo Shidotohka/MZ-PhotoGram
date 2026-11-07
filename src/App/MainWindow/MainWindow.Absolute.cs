@@ -70,9 +70,7 @@ public partial class MainWindow
         if (!run.Success)
         {
             ShowResult(FailTable($"绝对定向 · {label}", run.Message));
-            LogSolve("绝对定向", label, false, run.Message);
-            DiagSummary.Text = "✗ " + run.Message;
-            DiagSummary.Foreground = ErrBadge;
+            GateBlocked("绝对定向", run.Message);
             UpdateAbsolutePanel();
             return run;
         }

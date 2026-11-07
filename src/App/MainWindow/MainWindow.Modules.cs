@@ -117,12 +117,13 @@ public partial class MainWindow
             ? Visibility.Collapsed
             : Visibility.Visible;
 
-        // 绝对定向不解算像点、也不读相机检校文件：这两张卡在这个模块里只是噪音
-        // 模型交会与绝对定向都不解算像点、也不读相机检校文件：那两张卡在这里只是噪音，
+        // 模型交会与绝对定向都不解算像点：这张卡在这里只是噪音，
         // 还会把「载入控制点文件…」「求模型点」挤到折叠线以下。
-        var hideInspectorCards = isAbsolute || isModel;
-        PointInfoCard.Visibility = hideInspectorCards ? Visibility.Collapsed : Visibility.Visible;
-        InputCheckCard.Visibility = hideInspectorCards ? Visibility.Collapsed : Visibility.Visible;
+        PointInfoCard.Visibility = isAbsolute || isModel ? Visibility.Collapsed : Visibility.Visible;
+
+        // 「输入检查」是内定向自己的待办清单（框标、δ、相机文件），别的模块不显示它：
+        // 各模块只说各自的事，缺前置时由解算前的闸门拦下并写日志。
+        InputCheckCard.Visibility = isInterior ? Visibility.Visible : Visibility.Collapsed;
 
         if (isInterior)
         {

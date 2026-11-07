@@ -44,4 +44,19 @@ public partial class MainWindow
     {
         Log(ok ? "OK" : "✗", $"{what}{(ok ? "完成" : "未解出")}　{target}　{detail}");
     }
+
+    /// <summary>
+    /// 前置条件没满足（没做内定向就去相对定向这一类）：记日志、把底部状态条标红，
+    /// 并<b>切到日志页签</b>。
+    ///
+    /// <para>为什么不弹窗而切页签：各模块现在只显示自己的东西，缺的那一步往往不在当前页上，
+    /// 只改一行状态文字等于没提醒；而弹窗会把同一句话挡在屏幕中央，连着点几次就得关几次。</para>
+    /// </summary>
+    private void GateBlocked(string step, string message)
+    {
+        Log("✗", $"{step}被前置条件拦住：{message}");
+        DiagSummary.Text = "✗ " + message;
+        DiagSummary.Foreground = ErrBadge;
+        if (BottomTabsLog is not null) BottomTabsLog.IsChecked = true;
+    }
 }

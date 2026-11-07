@@ -120,24 +120,31 @@ public partial class MainWindow
 
     private void OnImageLoaded(object? sender, ImageItem item)
     {
-        var interior = item.Interior is { } io
-            ? $"内方位：f {io.FocalLength:0.###} mm · δ {io.PixelSizeMm:0.000000} mm/px\n" +
-              $"x0 {Format.Signed(io.X0, "0.0000")} · y0 {Format.Signed(io.Y0, "0.0000")} mm"
-            : "内方位元素：未设置";
-
-        ImageInfoText.Text = $"{item.Id}\n{item.Width} × {item.Height} px\n{interior}";
+        // 内定向归「内定向」模块：别的模块不念内方位（各模块只显示各自的事），
+        // 真缺了会在按下解算时被闸门拦住，写进日志。
+        var lines = new List<string> { item.Id, $"{item.Width} × {item.Height} px" };
+        if (_moduleName == "内定向")
+        {
+            lines.Add(item.Interior is { } io
+                ? $"内方位：f {io.FocalLength:0.###} mm\n" +
+                  $"δ {io.PixelSizeMm * 1000.0:0.###} µm（{io.PixelSizeMm:0.000000} mm/px）\n" +
+                  $"x0 {Format.Signed(io.X0, "0.0000")} · y0 {Format.Signed(io.Y0, "0.0000")} mm"
+                : "内方位元素：未设置");
+        }
+        ImageInfoText.Text = string.Join("\n", lines);
 
         Workspace.RefreshFiducials();
         if (_fiducialMode) EnsureFiducialPicking();
         UpdateFiducialUi();
 
-        // 参数式面板回填当前影像的内参，方便改
+        // 参数式面板回填当前影像的内参，方便改（像元尺寸按手册的单位：微米）
         if (item.Interior is { } current)
         {
             ParamF.Text = current.FocalLength.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
             ParamX0.Text = current.X0.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
             ParamY0.Text = current.Y0.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
-            ParamPixel.Text = current.PixelSizeMm.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture);
+            ParamPixel.Text = (current.PixelSizeMm * 1000.0)
+                .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         UpdateZoomLabel();

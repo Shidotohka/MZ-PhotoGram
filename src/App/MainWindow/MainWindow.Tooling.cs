@@ -1,3 +1,4 @@
+using System.Windows;
 using Photogrammetry.Core;
 
 namespace Photogrammetry.App;
@@ -26,6 +27,23 @@ public partial class MainWindow
     /// </summary>
     internal Project CurrentProject => _project;
 
+    /// <summary>「输入检查」卡上的原文。Snap 用它断言这张卡不再念无关的相机检校文件。</summary>
+    internal string CheckSummaryText => CheckText?.Text ?? string.Empty;
+
+    /// <summary>
+    /// 按厂家手册的微米数填一组参数式内参并应用。Snap 用它验「µm 输入 → mm/px 落库」这条换算；
+    /// 界面上对应的就是「方式一：参数式」那四个框加「应用到当前影像」。
+    /// </summary>
+    internal void ApplyParametricForTooling(string f, string x0, string y0, string um)
+    {
+        ModeParametric.IsChecked = true;   // 切到「方式一」，「方式二」的框标面板才让开
+        ParamF.Text = f;
+        ParamX0.Text = x0;
+        ParamY0.Text = y0;
+        ParamPixel.Text = um;
+        ApplyParametric_Click(this, new RoutedEventArgs());
+    }
+
     // ── 入口全表 ────────────────────────────────────────────────────────────
     //
     // 成员                        所在文件                  做什么
@@ -38,8 +56,10 @@ public partial class MainWindow
     // SelectGcp                   MainWindow.Gcp.cs        点表里选中一行（触发参考影像与刺点模式）
     // SolveResectionNow           MainWindow.Resection.cs  跑一次后方交会并刷新点表与残差页
     // CurrentProject              本文件                    读当前工程
+    // CheckSummaryText            本文件                    读「输入检查」卡的原文
+    // ApplyParametricForTooling   本文件                    填参数式内参（微米）并应用
     //
-    // 只有最后一条住在本文件里，其余七条留在它们各自的职责文件内：这些方法要碰
+    // 只有最后两条（`.pht` 之外的两条读口）住在本文件里，其余七条留在它们各自的职责文件内：这些方法要碰
     // x:Name 字段和私有状态，挪出来只会把两份代码拉远，收益只有「好找」，
     // 而上面这张表给的是同一份地图。
     //
