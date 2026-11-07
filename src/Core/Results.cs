@@ -33,6 +33,35 @@ public static class ResultKinds
         ResultKind.Absolute => "绝对定向",
         _ => kind.ToString(),
     };
+
+    /// <summary>
+    /// 这一步的结果依赖哪一步的成果。入账时要顺着链把没入账的前置一起带上
+    /// （否则会出现"文件里有七参数、没有相对定向"这种自相矛盾的工程）。
+    ///
+    /// <para>返回 null 表示它不依赖前面任何一步的**成果块**：内定向是链头，前方交会只算临时点。
+    /// 后方交会要内方位，相对定向要内方位，模型交会要相对定向，绝对定向要相对定向。</para>
+    /// </summary>
+    public static ResultKind? DependsOn(ResultKind kind) => kind switch
+    {
+        ResultKind.Resection => ResultKind.Interior,
+        ResultKind.Relative => ResultKind.Interior,
+        ResultKind.Model => ResultKind.Relative,
+        ResultKind.Absolute => ResultKind.Relative,
+        _ => null,
+    };
+}
+
+/// <summary>一份结果在"入账"这件事上的状态。</summary>
+public enum ResultState
+{
+    /// <summary>刚解出来，只在会话里。界面标「待定」，「接受」可按。</summary>
+    Pending,
+
+    /// <summary>已经写进工程（并保存过）。重开工程回来的结果都是这一档。</summary>
+    Accepted,
+
+    /// <summary>操作员否掉了。它已从集合里移除，只在日志里留一条。</summary>
+    Discarded,
 }
 
 /// <summary>元素表的一行：解出来的是什么。</summary>
@@ -91,6 +120,15 @@ public sealed class SolveResult
     /// <summary>页脚：口径与警告（敢不敢用这份结果）。比塞进表格更容易读。</summary>
     public string Note { get; set; } = string.Empty;
     public bool NoteWarn { get; set; }
+
+    /// <summary>
+    /// 入账状态。解算完是 <see cref="ResultState.Pending"/>：它只在会话里，要操作员按「接受」
+    /// 才写进工程（ADR-26）。重开工程时读回来的结果是 <see cref="ResultState.Accepted"/>。
+    /// </summary>
+    public ResultState State { get; set; } = ResultState.Pending;
+
+    /// <summary>入账时刻。没入账为 null。</summary>
+    public DateTime? AcceptedAt { get; set; }
 
     /// <summary>模块名（显示用）。</summary>
     public string KindLabel => ResultKinds.Label(Kind);
@@ -181,6 +219,41 @@ public sealed class ResultStore
     /// <summary>某一模块最近解出的那份（按解算时刻，不按放进来的顺序）。</summary>
     public SolveResult? LatestOf(ResultKind kind) =>
         Of(kind).OrderByDescending(result => result.SolvedAt).FirstOrDefault();
+
+    /// <summary>
+    /// 接受：把状态标成已入账。**写进工程不在这里做**——那一步要按 kind 落到
+    /// `images[]`/`pairs[]` 的对应块上，是 App 层的事（`Core` 不认识工程文件的形状，
+    /// 这里也不该认识）。这里只管"这份结果算数了"。
+    /// </summary>
+    public void Accept(SolveResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.State == ResultState.Accepted) return;
+
+        result.State = ResultState.Accepted;
+        result.AcceptedAt = DateTime.Now;
+    }
+
+    /// <summary>
+    /// 不采纳：从集合里移掉（"结果丢失"），状态留成 <see cref="ResultState.Discarded"/>
+    /// 供调用方写日志。返回原先有没有（重复不采纳不算错，但别重复记日志）。
+    /// </summary>
+    public bool Discard(SolveResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        result.State = ResultState.Discarded;
+
+        var key = (result.Kind, result.TargetId);
+        if (!_items.TryGetValue(key, out var current) || !ReferenceEquals(current, result)) return false;
+
+        _items.Remove(key);
+        _order.Remove(key);
+        if (ReferenceEquals(Latest, result)) Latest = _order.Count > 0 ? _items[_order[^1]] : null;
+        return true;
+    }
+
+    /// <summary>还没入账的份数（界面提示"有 N 份待定"用）。</summary>
+    public int PendingCount => _order.Count(key => _items[key].State == ResultState.Pending);
 
     /// <summary>换工程时清空：上一份结果对着旧数据，留着必然被误读。</summary>
     public void Clear()
