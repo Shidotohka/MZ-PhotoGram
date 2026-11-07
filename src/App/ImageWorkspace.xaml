@@ -48,7 +48,7 @@
                                RenderOptions.BitmapScalingMode="HighQuality"
                                Visibility="Collapsed"/>
                         <TextBlock x:Name="ReferenceHint" Margin="14"
-                                   Text="选中一个控制点后，这里显示它的放大影像。&#x0a;&#x0a;没有放大影像也能刺点——这块只是对照。"
+                                   Text="无放大影像"
                                    FontSize="11" TextWrapping="Wrap" TextAlignment="Center"
                                    Foreground="{StaticResource DimBrush}"
                                    VerticalAlignment="Center" HorizontalAlignment="Center"/>

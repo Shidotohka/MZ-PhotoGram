@@ -273,9 +273,10 @@ public partial class MainWindow
         }
 
         var path = _zoomImages.TryGetValue(gcp.Id, out var found) ? found : null;
+        // 文件名就是点号，标题里只写点号；文件名在列表行的 tooltip 里
         Workspace.ShowReference(path, path is null
             ? $"{gcp.Id} · 无放大影像"
-            : $"{gcp.Id} · {Path.GetFileName(path)}");
+            : gcp.Id);
     }
 
     /// <summary>载入控制点放大影像。文件名（去扩展名）要能对上点号。</summary>
@@ -314,25 +315,17 @@ public partial class MainWindow
                                : $"\n  点号对不上的 {unknown.Count} 个：{string.Join("、", unknown.Take(8))}");
     }
 
-    /// <summary>重建「载入控制点图像」按钮下面的列表。</summary>
+    /// <summary>重建「载入控制点图像」按钮下面的列表。没有放大影像时整块收起，不留空框与说明。</summary>
     private void RebuildZoomImageList()
     {
-        if (ZoomImageListPanel is null) return;
+        if (ZoomImageListPanel is null || ZoomImageListBorder is null) return;
         ZoomImageListPanel.Children.Clear();
 
-        if (_zoomImages.Count == 0)
-        {
-            var hint = new TextBlock
-            {
-                Text = "尚未载入控制点放大影像。\n加载后每个点一行，点一行就在左窗看它。",
-                FontSize = 10.5,
-                Foreground = DimBadge,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(4, 3, 4, 3),
-            };
-            ZoomImageListPanel.Children.Add(hint);
-            return;
-        }
+        ZoomImageListBorder.Visibility = _zoomImages.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (_zoomImages.Count == 0) return;
 
         foreach (var gcp in _project.Gcps)
         {
@@ -341,8 +334,10 @@ public partial class MainWindow
             var isActive = _activeGcpId == gcp.Id;
             var row = new Button
             {
-                Content = $"{gcp.Id}    {Path.GetFileName(path)}",
+                // 文件名就是点号，摆两遍只是噪音；全名放 tooltip
+                Content = gcp.Id,
                 Tag = gcp.Id,
+                ToolTip = Path.GetFileName(path),
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 10.5,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
@@ -356,18 +351,6 @@ public partial class MainWindow
             };
             row.Click += ZoomImageRow_Click;
             ZoomImageListPanel.Children.Add(row);
-        }
-
-        var missing = _project.Gcps.Count(g => !_zoomImages.ContainsKey(g.Id));
-        if (missing > 0)
-        {
-            ZoomImageListPanel.Children.Add(new TextBlock
-            {
-                Text = $"还有 {missing} 个点没有放大影像（不影响刺点）",
-                FontSize = 10.5,
-                Foreground = DimBadge,
-                Margin = new Thickness(6, 3, 4, 3),
-            });
         }
     }
 

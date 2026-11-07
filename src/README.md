@@ -15,27 +15,31 @@ src/
 │   ├── TreeNode.cs                 数据树的节点模型
 │   ├── ImageView.xaml(.cs)         单个视窗：影像 + 变换 + 像点/框标取点与命中
 │   ├── ImageWorkspace.xaml(.cs)    工作区四态：单图 / 双图 / 模型 / 报告
+│   ├── ResultWindow.xaml(.cs)      结果与残差窗口（非模态、单实例、只显示当前模块；结果集合的视图）
 │   ├── FiducialEditorWindow.xaml(.cs)  框标坐标的手工录入与改正
 │   ├── Services/
 │   │   └── ImageLibrary.cs           影像解码与缓存（只管路径 → 冻结位图）
 │   ├── Format.cs                    数字格式化：Fixed / Signed / 小数位，一处收口
-│   └── MainWindow/                五区骨架，按职责拆成 12 个 partial
+│   └── MainWindow/                五区骨架，按职责拆成 14 个 partial
 │       ├── MainWindow.xaml          界面骨架（StartupUri 指向这里）
-│       ├── MainWindow.xaml.cs       412 行　外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
-│       ├── MainWindow.Interior.cs   518 行　内定向（含框标表的行类型）
-│       ├── MainWindow.Gcp.cs        518 行　控制点、刺点、放大影像
-│       ├── MainWindow.Intersection.cs 217 行　前方交会：配对、解算
-│       ├── MainWindow.Relative.cs   443 行　相对定向：同名点配对、解算、点表
-│       ├── MainWindow.Results.cs    439 行　结果残差页：元素表 + 残差表（四个模块共用）
-│       ├── MainWindow.Tree.cs       202 行　数据树
-│       ├── MainWindow.Modules.cs    149 行　作业方法与模块切换
-│       ├── MainWindow.Library.cs    142 行　影像库：添加、去重 Id、载入工作区
-│       ├── MainWindow.Resection.cs  123 行　后方交会（流程在 Core/Tasks，这里只剩显示）
-│       ├── MainWindow.Log.cs         47 行　日志页
-│       └── MainWindow.Tooling.cs     48 行　给 Snap 的 8 个 internal 入口登记表
+│       ├── MainWindow.xaml.cs       外壳：菜单、工程读写、视图工具条、状态栏、页签、快捷键
+│       ├── MainWindow.Interior.cs   内定向（含框标表的行类型）
+│       ├── MainWindow.Gcp.cs        控制点、刺点、放大影像
+│       ├── MainWindow.Intersection.cs 前方交会：配对、解算、自动匹配
+│       ├── MainWindow.Relative.cs   相对定向：同名点配对、解算、点表
+│       ├── MainWindow.Results.cs    结果：各模块的「元素 + 残差」装配、结果集合与窗口入口
+│       ├── MainWindow.Model.cs      模型交会
+│       ├── MainWindow.Absolute.cs   绝对定向
+│       ├── MainWindow.Tree.cs       数据树
+│       ├── MainWindow.Modules.cs    作业方法与模块切换
+│       ├── MainWindow.Library.cs    影像库：添加、去重 Id、载入工作区
+│       ├── MainWindow.Resection.cs  后方交会（流程在 Core/Tasks，这里只剩显示）
+│       ├── MainWindow.Log.cs        日志页
+│       └── MainWindow.Tooling.cs    给 Snap 的 internal 入口登记表
 ├── Core/                           数据适配与流程控制（不含任何界面依赖，也不含平差计算）
 │   ├── Coordinates.cs              四种坐标类型 + 像素↔像平面换算 + 地面轴序（手性判定、换轴）
-│   ├── Model.cs                    工程实体：相机 / 框标 / 影像 / 控制点 / 像点 / 像对 / 模型 / 结果
+│   ├── Results.cs                  结果集合：SolveResult（元素 + 残差 + 页脚）与 ResultStore（会话级留存）
+│   ├── Model.cs                    工程实体：相机 / 框标 / 影像 / 控制点 / 像点 / 像对
 │   ├── ProjectFile.cs              工程索引读写（原子写、备份轮转、相对路径）
 │   ├── CameraFile.cs               相机检校文件读取（E-FOTO .cmr / CSV）
 │   ├── ControlPointFile.cs         控制点文件解析（RTF / CSV）
@@ -92,7 +96,7 @@ dotnet build src/PhotogrammetryWorkbench.sln -c Debug -m:1
 
 **进度以 [Docs/路线图.md](../Docs/路线图.md) 为唯一真源。**
 
-M1–M5 完成，**M6 相对定向也通了**（内核 + 托管层 + 界面 + 点表持久化），界面已按三种作业方法分流。
+M1–M7、M9–M11 完成，两条作业方法在界面上都能出结果；下一步是 M8 报告。
 **结构重构的六步已全部完成**，每步都要求回归基线逐字不变、截图逐字节相同——
 计划、分步记录与验收基线见[重构计划](../Docs/重构计划.md)。
 
@@ -140,6 +144,8 @@ dotnet run --project src/Snap/Snap.csproj -c Debug -- --out out.png --module 后
 | `--project` `--gcp` `--camera` | 载入工程 / 控制点 / 相机文件 |
 | `--openmenu` `--tab` | 展开某个菜单、切底部页签 |
 | `--selftest` `--probe` `--control` `--fiducial` `--intersect` `--relative` | 六套数值与闸门自检，不截图 |
+| `--results` | 结果集合的覆盖语义（并存 / 覆盖 / 顺序 / 计数 / 事件 / 清空），不截图 |
+| `--result-shot` | 把已打开的结果窗口单独渲染成 PNG（它不在主窗的渲染树里） |
 | `--abi` | 打印 ABI 布局：每个结构体的尺寸、字段顺序与偏移，以及全部 DllImport 签名 |
 | `--interior-demo` | 界面端到端：给当前影像装一组框标，按「解算内定向」，再检查结果页的行（配合 `--camera`） |
 | `--relative-demo` | 界面端到端：两张片各点 12 对同名点 → 解算，再检查结果页的行与列（配合 `--image` + `--loadsecond`） |

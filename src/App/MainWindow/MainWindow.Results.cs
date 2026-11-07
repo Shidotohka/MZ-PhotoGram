@@ -3,215 +3,166 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
 using Photogrammetry.Core;
 using Photogrammetry.Core.Tasks;
 
 namespace Photogrammetry.App;
 
 /// <summary>
-/// 「结果残差」页：各模块解出的元素与逐点残差都摆在这一页，<b>右栏不放结果</b>。
+/// 结果：一份解算的「元素表 + 残差表」怎么装，以及它进了哪个集合、给谁看。
 ///
-/// <para>
-/// 为什么集中到一页：结果是拿来比、拿来贴进报告的，等宽文字块排版对不齐也选不出来；
-/// 而且四个模块各写一套文字，判「哪个点偏大」的写法就会各不相同。这里统一成
-/// <b>左元素表 + 右残差表</b>，列名随模块变，行高、字号、警示色只有一份。
-/// </para>
-/// <para>
-/// 结果页是<b>快照</b>：它记的是「上一次按解算时算出的东西」，标题里带着是哪张片、
-/// 哪个像对。改了观测（删点、补点）不会自动重算，要再按一次解算——这和作业员的预期一致，
-/// 没有人希望删一个点之后结论悄悄变了。
-/// </para>
-/// <para>
-/// 标题上<b>只有「任务 · 对象」</b>：成功与否、迭代几次、什么时刻，都进日志
-/// （<see cref="Log"/>）。过程信息摆在结果页上，人会把它们当成结果的一部分去引用。
-/// </para>
+/// <para><b>结果不再放底部页签，也不放右栏。</b>底部那一页只有一个槽，第二步算完第一步
+/// 就没了；右栏 372 px 又会把十几行残差挤到折叠线以下。现在结果按
+/// 「模块 + 对象」留在会话级的 <see cref="ResultStore"/> 里，由
+/// <see cref="ResultWindow"/> 显示——一个窗口装全部，选哪份看哪份（ADR-25）。</para>
+///
+/// <para>每个模块只负责把「解出来的东西」翻译成人能读的几行（下面那七个构造函数），
+/// 排版与留档不归它们管。</para>
 /// </summary>
 public partial class MainWindow
 {
-    // ===================== 表格的行 =====================
+    private readonly ResultStore _results = new();
 
-    /// <summary>元素表的一行：解出来的是什么。</summary>
-    internal sealed class ResultRow
-    {
-        public string Name { get; init; } = string.Empty;
-        public string Symbol { get; init; } = string.Empty;
-        public string Value { get; init; } = string.Empty;
-        public string Unit { get; init; } = string.Empty;
-        public string Note { get; init; } = string.Empty;
-
-        /// <summary>这一行的数不可信（诊断值、残差偏大）。界面上染成错误色。</summary>
-        public bool Warn { get; init; }
-    }
+    /// <summary>结果窗口。单实例、非模态；关掉后置空，下次再开。</summary>
+    private ResultWindow? _resultWindow;
 
     /// <summary>
-    /// 残差表的一行。列数随模块变（内定向两列、后方交会四列、相对定向三列），
-    /// 所以用字符串数组而不是固定字段；列名与顺序由 <see cref="ResultTable.Headers"/> 定。
+    /// 模块名 → 结果种类。「报告」「光束平差」没有结果，返回 null。
+    /// 窗口按它划作用域：这一步的结果只在这一步里看。
     /// </summary>
-    internal sealed class ResidualRow
+    private static ResultKind? KindOfModule(string module) => module switch
     {
-        public string[] Cells { get; init; } = Array.Empty<string>();
-        public bool Warn { get; init; }
-    }
+        "内定向" => ResultKind.Interior,
+        "后方交会" => ResultKind.Resection,
+        "前方交会" => ResultKind.Intersection,
+        "相对定向" => ResultKind.Relative,
+        "模型交会" => ResultKind.Model,
+        "绝对定向" => ResultKind.Absolute,
+        _ => null,
+    };
 
-    /// <summary>一次解算要摆到界面上的全部内容。构造过程就是「把结果翻译成人能读的几行」。</summary>
-    internal sealed class ResultTable
-    {
-        public string Title { get; init; } = "结果残差";
+    /// <summary>当前模块对应的结果种类。Snap 用它验「窗口跟到刚解的那一步」。</summary>
+    internal ResultKind? CurrentResultKind => KindOfModule(_moduleName);
 
-        /// <summary>整份结果不可信（没收敛、被判不采用）。标题染成错误色，并写「未解出」。</summary>
-        public bool Warn { get; init; }
-
-        public List<ResultRow> Items { get; } = new();
-        public List<string> Headers { get; } = new();
-        public List<ResidualRow> Rows { get; } = new();
-
-        /// <summary>页脚：口径与警告（敢不敢用这份结果）。比塞进表格更容易读。调用方可以补写（例如把解算提醒拼进去）。</summary>
-        public string Note { get; set; } = string.Empty;
-        public bool NoteWarn { get; set; }
-
-        public ResultTable Add(string name, string symbol, string value, string unit = "",
-            string note = "", bool warn = false)
-        {
-            Items.Add(new ResultRow
-            {
-                Name = name, Symbol = symbol, Value = value, Unit = unit, Note = note, Warn = warn,
-            });
-            return this;
-        }
-
-        /// <summary>数值行。<paramref name="format"/> 用不变区域性，免得换个系统语言小数点变成逗号。</summary>
-        public ResultTable Num(string name, string symbol, double value, string format,
-            string unit = "", string note = "", bool warn = false) =>
-            Add(name, symbol, Fmt(value, format), unit, note, warn);
-
-        public ResultTable Head(params string[] headers)
-        {
-            Headers.AddRange(headers);
-            return this;
-        }
-
-        public ResultTable Row(params string[] cells) => Row(false, cells);
-
-        public ResultTable Row(bool warn, params string[] cells)
-        {
-            Rows.Add(new ResidualRow { Cells = cells, Warn = warn });
-            return this;
-        }
-    }
+    /// <summary>结果窗口现在管哪一步。没开就是 null。</summary>
+    internal ResultKind? ResultWindowScope => _resultWindow?.Scope;
 
     // ===================== 显示 =====================
 
-    /// <summary>把一份结果摆到页上，并切到这一页。所有模块都从这儿进。</summary>
-    private void ShowResult(ResultTable table)
+    /// <summary>一份结果算完了：留档、更新右栏按钮、把窗口切到这一步并选中它。</summary>
+    private void ShowResult(SolveResult result)
     {
-        ResTitleText.Text = table.Title;
-        ResTitleText.Foreground = table.Warn ? ErrBadge : MutBadge;
+        _results.Put(result);
+        UpdateResultButton();
 
-        ResultGrid.ItemsSource = table.Items;
-        BuildResidualColumns(table.Headers);
-        ResidualGrid.ItemsSource = table.Rows;
+        if (_resultWindow is { IsVisible: true } window)
+        {
+            // 刚解的是哪一步，窗口就显示哪一步——不把别的步骤的结果并排放在一起
+            window.ShowKind(result.Kind, result);
+            if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+            return;
+        }
 
-        // 没有逐点残差（解算没通过）就把右表整块收起来，把宽度让给元素表
-        var hasResiduals = table.Headers.Count > 0;
-        ResidualGrid.Visibility = hasResiduals ? Visibility.Visible : Visibility.Collapsed;
-        ResColumnSplitter.Visibility = hasResiduals ? Visibility.Visible : Visibility.Collapsed;
-        Grid.SetColumnSpan(ResultGrid, hasResiduals ? 1 : 3);
-
-        ResNoteText.Text = table.Note;
-        ResNoteText.Foreground = table.NoteWarn ? WarnBadge : DimBadge;
-        ResNoteText.Visibility = string.IsNullOrEmpty(table.Note)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-
-        ResEmptyText.Visibility = Visibility.Collapsed;
-
-        // 198 px 只够看三行，等于没给人看：第一次出结果时把面板撑开
-        EnsureResultPanelHeight();
-
-        // 解完直接把这一页翻出来。结果在折叠线以下、要用户自己去找，等于没显示
-        ResTab.IsChecked = true;
-    }
-
-    /// <summary>用户自己拖过分隔条之后，就别再替他改高度。</summary>
-    private bool _bottomPanelDragged;
-
-    private void BottomSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
-        _bottomPanelDragged = true;
-
-    /// <summary>结果页出内容时，把底部面板撑到至少 240 px。</summary>
-    private void EnsureResultPanelHeight()
-    {
-        if (_bottomPanelDragged || BottomPanelRow is null) return;
-
-        var height = BottomPanelRow.Height;
-        if (!height.IsAbsolute || height.Value < 240)
-            BottomPanelRow.Height = new GridLength(240);
-    }
-
-    /// <summary>退回「尚未解算」。换工程时用：上一份结果对着旧数据，留着必然被误读。</summary>
-    private void ClearResult()
-    {
-        if (ResultGrid is null) return;
-
-        ResultGrid.ItemsSource = null;
-        ResidualGrid.ItemsSource = null;
-        ResidualGrid.Columns.Clear();
-        ResidualGrid.Visibility = Visibility.Collapsed;
-        ResColumnSplitter.Visibility = Visibility.Collapsed;
-        Grid.SetColumnSpan(ResultGrid, 3);
-
-        ResTitleText.Text = "结果残差 · 尚未解算";
-        ResTitleText.Foreground = MutBadge;
-        ResNoteText.Text = string.Empty;
-        ResNoteText.Visibility = Visibility.Collapsed;
-        ResEmptyText.Visibility = Visibility.Visible;
+        if (ResultWindow.AutoOpen) OpenResultWindow(result.Kind);
     }
 
     /// <summary>
-    /// 残差表的列按 <paramref name="headers"/> 现生成。第一列定宽（点号，宽度跳来跳去最难读），
-    /// 中间按内容自适应，最后那一列「说明」吃掉剩下的宽度。
+    /// 打开（或唤起）结果窗口。右栏按钮、菜单「查看 → 结果与残差…」与 F3 都走这里。
+    ///
+    /// <para><paramref name="kind"/> 不给就用当前模块；没有结果的步骤（报告、光束平差）
+    /// 直接不开。没有结果时也允许打开：空状态那句话正是「结果会留在这里」的说明。</para>
     /// </summary>
-    private void BuildResidualColumns(IReadOnlyList<string> headers)
+    private void OpenResultWindow(ResultKind? kind = null)
     {
-        ResidualGrid.Columns.Clear();
-
-        for (var i = 0; i < headers.Count; i++)
+        var scope = kind ?? KindOfModule(_moduleName);
+        if (scope is not { } target)
         {
-            var column = new DataGridTextColumn
-            {
-                Header = headers[i],
-                Binding = new Binding($"Cells[{i}]") { Mode = BindingMode.OneWay },
-                MinWidth = i == 0 ? 76 : 76,
-            };
+            // 「报告」「光束平差」没有结果；菜单/快捷键也得给一句，不能静默无反应
+            DiagSummary.Text = "! 这一步没有结果可看（报告还没实现）";
+            DiagSummary.Foreground = WarnBadge;
+            return;
+        }
 
-            column.Width = i == 0
-                ? new DataGridLength(96)
-                : i == headers.Count - 1 && headers.Count > 2
-                    ? new DataGridLength(1, DataGridLengthUnitType.Star)
-                    : new DataGridLength(1, DataGridLengthUnitType.Auto);
+        if (_resultWindow is { IsVisible: true } window)
+        {
+            // 从另一模块按「结果」时，窗口跟着切过去，而不是并排摆两套结果
+            window.ShowKind(target, _results.LatestOf(target));
+            window.Activate();
+            return;
+        }
 
-            ResidualGrid.Columns.Add(column);
+        _resultWindow = new ResultWindow(_results, target) { Owner = this };
+        _resultWindow.Closed += (_, _) => _resultWindow = null;
+        _resultWindow.Show();
+    }
+
+    private void ResultButton_Click(object sender, RoutedEventArgs e) => OpenResultWindow();
+
+    private void OpenResults_Click(object sender, RoutedEventArgs e) => OpenResultWindow();
+
+    /// <summary>
+    /// 右栏标题上那颗按钮：**当前这一步**有几份结果 + 能不能按。
+    /// 解算前禁用，不让人点了个寂寞；切模块时跟着变。
+    /// </summary>
+    private void UpdateResultButton()
+    {
+        if (ResultButton is null) return;
+
+        var kind = KindOfModule(_moduleName);
+        var count = kind is { } k ? _results.CountOf(k) : 0;
+
+        ResultButton.Content = count == 0 ? "结果" : $"结果 ({count})";
+        ResultButton.IsEnabled = count > 0;
+        ResultButton.ToolTip = kind is null
+            ? "这一步没有结果可看"
+            : count == 0
+                ? $"{ResultKinds.Label(kind.Value)}还没有结果：解算之后会留在这里"
+                : $"查看{ResultKinds.Label(kind.Value)}的 {count} 份结果（F3）";
+    }
+
+    /// <summary>换工程时用：上一份结果对着旧数据，留着必然被误读。</summary>
+    private void ClearResult()
+    {
+        _results.Clear();
+        UpdateResultButton();
+
+        // 窗口不订阅集合，这里显式让它退回空状态。
+        // 当前模块没有结果种类（报告/光束平差）时，留在窗口原来的作用域上清空。
+        if (_resultWindow is { IsVisible: true } window)
+        {
+            window.ShowKind(KindOfModule(_moduleName) ?? window.Scope, null);
         }
     }
 
     // ===================== 供离屏渲染工具断言 =====================
 
-    /// <summary>当前结果页上有什么。给 Snap 用——它验的是"界面真的显示了这几行"，不是"算对了"。</summary>
+    /// <summary>一份结果上有什么。给 Snap 用——它验的是"界面真的摆出了这几行"，不是"算对了"。</summary>
     internal sealed record ResultSnapshot(
+        ResultKind? Kind,
         string Title,
         IReadOnlyList<ResultRow> Items,
         IReadOnlyList<string> Headers,
         IReadOnlyList<ResidualRow> Rows,
         string Note);
 
-    internal ResultSnapshot SnapshotResult() => new(
-        ResTitleText.Text,
-        ResultGrid.ItemsSource is IEnumerable<ResultRow> items ? items.ToList() : Array.Empty<ResultRow>(),
-        ResidualGrid.Columns.Select(c => c.Header?.ToString() ?? string.Empty).ToList(),
-        ResidualGrid.ItemsSource is IEnumerable<ResidualRow> rows ? rows.ToList() : Array.Empty<ResidualRow>(),
-        ResNoteText.Text);
+    /// <summary>最近一次解出的结果。没有结果时返回一份空的（标题写「尚未解算」）。</summary>
+    internal ResultSnapshot SnapshotResult() =>
+        _results.Latest is { } result
+            ? ToSnapshot(result)
+            : new ResultSnapshot(null, "尚未解算", Array.Empty<ResultRow>(),
+                Array.Empty<string>(), Array.Empty<ResidualRow>(), string.Empty);
+
+    /// <summary>会话里的全部结果，按作业顺序。Snap 用它验「解第二步没有把第一步顶掉」。</summary>
+    internal IReadOnlyList<ResultSnapshot> SnapshotResults() => _results.All.Select(ToSnapshot).ToList();
+
+    /// <summary>结果窗口现在是不是开着。Snap 用它验「解完自动打开」这条。</summary>
+    internal bool ResultWindowIsOpen => _resultWindow is { IsVisible: true };
+
+    /// <summary>结果窗口本体。Snap 的 <c>--result-shot</c> 要单独渲染它（它不在主窗的树里）。</summary>
+    internal Window? ResultWindowForTooling => _resultWindow;
+
+    private static ResultSnapshot ToSnapshot(SolveResult result) =>
+        new(result.Kind, result.Title, result.Items, result.Headers, result.Rows, result.Note);
 
     // ===================== 各模块的结果表 =====================
     private static string Fmt(double value, string format) => Format.Fixed(value, format);
@@ -226,14 +177,17 @@ public partial class MainWindow
         _ => "b_x",
     };
 
-    /// <summary>解算没通过时的那一页：一行「未解出」，原因写在页脚。</summary>
-    private static ResultTable FailTable(string title, string message, bool notAdopted = false)
+    /// <summary>解算没通过时的那一份：一行「未解出」，原因写在页脚。</summary>
+    private static SolveResult FailTable(ResultKind kind, string targetId, string title,
+        string message, bool notAdopted = false)
     {
-        var table = new ResultTable
+        var table = new SolveResult
         {
-            // 失败必须写在标题上：结果页是快照，翻回来的人先看到的就是标题这一行
+            Kind = kind,
+            TargetId = targetId,
+            // 失败必须写在标题上：结果是快照，翻回来的人先看到的就是标题这一行
             Title = title + (notAdopted ? " · 未采用" : " · 未解出"),
-            Warn = true,
+            Failed = true,
             Note = message,
             NoteWarn = true,
         };
@@ -244,10 +198,12 @@ public partial class MainWindow
 
     // ---------- 内定向 ----------
 
-    private static ResultTable InteriorResult(ImageItem image, FiducialOrientationResult r)
+    private static SolveResult InteriorResult(ImageItem image, FiducialOrientationResult r)
     {
-        var table = new ResultTable
+        var table = new SolveResult
         {
+            Kind = ResultKind.Interior,
+            TargetId = image.Id,
             Title = $"内定向 · {image.Id}",
         };
 
@@ -280,12 +236,40 @@ public partial class MainWindow
         return table;
     }
 
+    /// <summary>
+    /// 参数式内定向的结果：只把「采用了哪组内参」摆出来，没有残差与 σ₀。
+    ///
+    /// <para>它以前不进结果——参数式只是把四个数抄进模型，于是「内定向算完了，结果窗口里
+    /// 什么都没有」。可它同样是一次内定向的结论，换片、复核、抄进报告都要看它；
+    /// 没有多余观测不是不记录的理由，写在页脚里即可。</para>
+    /// </summary>
+    private static SolveResult ParametricInteriorResult(ImageItem image, InteriorOrientation io)
+    {
+        var table = new SolveResult
+        {
+            Kind = ResultKind.Interior,
+            TargetId = image.Id,
+            Title = $"内定向 · {image.Id}",
+        };
+
+        table.Num("焦距", "f", io.FocalLength, "0.0000", "mm", "参数式：直接采用给定值");
+        table.Num("主点 x", "x₀", io.X0, "+0.000000;-0.000000", "mm");
+        table.Num("主点 y", "y₀", io.Y0, "+0.000000;-0.000000", "mm");
+        table.Num("像元尺寸", "δ", io.PixelSizeMm, "0.000000", "mm/px");
+        table.Add("影像尺寸", "—", $"{image.Width} × {image.Height}", "px");
+
+        table.Note = "参数式：直接采用给定内参，没有多余观测，所以没有 σ₀ 与框标残差。要精度指标请用框标仿射。";
+        return table;
+    }
+
     // ---------- 后方交会 ----------
 
-    private static ResultTable ResectionResult(ImageItem image, ResectionResult r)
+    private static SolveResult ResectionResult(ImageItem image, ResectionResult r)
     {
-        var table = new ResultTable
+        var table = new SolveResult
         {
+            Kind = ResultKind.Resection,
+            TargetId = image.Id,
             Title = $"后方交会 · {image.Id}",
         };
 
@@ -323,9 +307,10 @@ public partial class MainWindow
     }
 
     /// <summary>参数没能通过闸门时的诊断页：数值照给，但每行都标成不可信。</summary>
-    private static ResultTable ResectionDiagnostic(ImageItem? image, ResectionResult r)
+    private static SolveResult ResectionDiagnostic(ImageItem? image, ResectionResult r)
     {
-        var table = FailTable($"后方交会 · {image?.Id ?? "—"}",
+        var id = image?.Id ?? "—";
+        var table = FailTable(ResultKind.Resection, id, $"后方交会 · {id}",
             $"（rc = {r.ErrorCode}）{r.Message}", notAdopted: true);
 
         table.Add("摄影中心 X", "X_S", Fmt(r.Xs, "0.000"), "m", "诊断值，不要当结果", true);
@@ -340,13 +325,15 @@ public partial class MainWindow
 
     // ---------- 前方交会 ----------
 
-    private static ResultTable IntersectionResult(IntersectionRun run)
+    private static SolveResult IntersectionResult(IntersectionRun run)
     {
         var r = run.Result!;
         var p = r.Point;
 
-        var table = new ResultTable
+        var table = new SolveResult
         {
+            Kind = ResultKind.Intersection,
+            TargetId = $"{run.Left?.Id} / {run.Right?.Id}",
             Title = $"前方交会 · {run.Left?.Id} / {run.Right?.Id}",
         };
 
@@ -379,9 +366,14 @@ public partial class MainWindow
 
     // ---------- 模型交会 ----------
 
-    private ResultTable ModelResultTable(ModelIntersectionOutcome outcome)
+    private SolveResult ModelResultTable(ModelIntersectionOutcome outcome)
     {
-        var table = new ResultTable { Title = $"模型交会 · {outcome.PairLabel}" };
+        var table = new SolveResult
+        {
+            Kind = ResultKind.Model,
+            TargetId = outcome.PairLabel,
+            Title = $"模型交会 · {outcome.PairLabel}",
+        };
 
         table.Add("控制点", "—", outcome.Observations.Count.ToString(CultureInfo.InvariantCulture), "个",
             $"其中检查点 {outcome.Observations.Count(o => o.Type == GcpType.CheckPoint)} 个");
@@ -410,10 +402,15 @@ public partial class MainWindow
 
     // ---------- 绝对定向 ----------
 
-    private ResultTable AbsoluteResultTable(AbsoluteOrientationRun run)
+    private SolveResult AbsoluteResultTable(AbsoluteOrientationRun run)
     {
         var r = run.Result!;
-        var table = new ResultTable { Title = $"绝对定向 · {run.PairLabel}" };
+        var table = new SolveResult
+        {
+            Kind = ResultKind.Absolute,
+            TargetId = run.PairLabel,
+            Title = $"绝对定向 · {run.PairLabel}",
+        };
 
         table.Num("尺度", "λ", r.Scale, "0.000000", "", "模型单位 → 米");
         table.Num("旋转", "φ", r.PhiDeg, "+0.0000;-0.0000", "°", "模型系 → 地面系");
@@ -487,15 +484,17 @@ public partial class MainWindow
 
     // ---------- 相对定向 ----------
 
-    private ResultTable RelativeResultTable(RelativeRun run)
+    private SolveResult RelativeResultTable(RelativeRun run)
     {
         var r = run.Result!;
         var pair = run.Left is null || run.Right is null
             ? null
             : _project.FindPair(run.Left.Id, run.Right.Id);
 
-        var table = new ResultTable
+        var table = new SolveResult
         {
+            Kind = ResultKind.Relative,
+            TargetId = $"{run.Left?.Id} → {run.Right?.Id}",
             Title = $"相对定向 · {run.Left?.Id} → {run.Right?.Id}",
         };
 
@@ -544,4 +543,17 @@ public partial class MainWindow
 
         return table;
     }
+}
+
+/// <summary>
+/// 结果里的数值行。<see cref="SolveResult"/> 在 <c>Core</c>，不该知道界面怎么排版，
+/// 也不该知道「NaN 写成 —」这种约定；数字写法属于界面（<see cref="Format"/>），所以这条
+/// 便利方法留在这一层。
+/// </summary>
+internal static class SolveResultFormatting
+{
+    /// <summary>数值行。<paramref name="format"/> 用不变区域性，免得换个系统语言小数点变成逗号。</summary>
+    public static SolveResult Num(this SolveResult table, string name, string symbol, double value,
+        string format, string unit = "", string note = "", bool warn = false) =>
+        table.Add(name, symbol, Format.Fixed(value, format), unit, note, warn);
 }

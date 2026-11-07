@@ -12,113 +12,15 @@
         Foreground="{StaticResource TextBrush}"
         TextOptions.TextFormattingMode="Display">
 
-    <Window.Resources>
-        <!-- 点表两套列共用同一副皮，样式只写一份 -->
-        <Style x:Key="MeasureHeaderStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="{StaticResource Panel3Brush}"/>
-            <Setter Property="Foreground" Value="{StaticResource MutBrush}"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Padding" Value="8,4"/>
-            <Setter Property="BorderThickness" Value="0,0,1,1"/>
-            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
-        </Style>
-
-        <Style x:Key="MeasureCellStyle" TargetType="DataGridCell">
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="8,0"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="DataGridCell">
-                        <Border Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="MeasureGridStyle" TargetType="DataGrid">
-            <Setter Property="AutoGenerateColumns" Value="False"/>
-            <Setter Property="IsReadOnly" Value="True"/>
-            <Setter Property="CanUserAddRows" Value="False"/>
-            <Setter Property="CanUserResizeRows" Value="False"/>
-            <Setter Property="HeadersVisibility" Value="Column"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-            <Setter Property="SelectionMode" Value="Single"/>
-            <Setter Property="SelectionUnit" Value="FullRow"/>
-            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Panel3Brush}"/>
-            <Setter Property="RowBackground" Value="{StaticResource PanelBrush}"/>
-            <Setter Property="AlternatingRowBackground" Value="{StaticResource Panel2Brush}"/>
-            <Setter Property="RowHeight" Value="22"/>
-            <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="ColumnHeaderStyle" Value="{StaticResource MeasureHeaderStyle}"/>
-            <Setter Property="CellStyle" Value="{StaticResource MeasureCellStyle}"/>
-        </Style>
-
-        <!-- ===== 结果残差页的两张表 =====
-
-             与点表共用一副皮，只多两样本事：
-             ① 行可按数据染成警示色（残差偏大的那行），所以单元格不能自己钉死前景色，
-                否则行上的颜色传不下来；
-             ② 残差表的列由代码按模块生成（内定向列框标、后方交会列控制点、相对定向列同名点）。 -->
-        <Style x:Key="ResultCellStyle" TargetType="DataGridCell">
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="8,0"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="DataGridCell">
-                        <Border Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="ResultRowStyle" TargetType="DataGridRow">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding Warn}" Value="True">
-                    <Setter Property="Foreground" Value="{StaticResource ErrBrush}"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="ResultGridStyle" TargetType="DataGrid"
-               BasedOn="{StaticResource MeasureGridStyle}">
-            <Setter Property="CellStyle" Value="{StaticResource ResultCellStyle}"/>
-            <Setter Property="RowStyle" Value="{StaticResource ResultRowStyle}"/>
-        </Style>
-    </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="46"/>
             <RowDefinition Height="42"/>
             <RowDefinition Height="*" MinHeight="240"/>
-            <!-- 分隔条自己占一行：结果表动辄十几行，198 px 只够看个零头，得能往上拖 -->
+            <!-- 分隔条自己占一行：底部三页（点表 / 诊断 / 日志）都不够高时能往上拖 -->
             <RowDefinition Height="5"/>
-            <RowDefinition x:Name="BottomPanelRow" Height="198" MinHeight="120"/>
+            <RowDefinition Height="198" MinHeight="120"/>
             <RowDefinition Height="26"/>
         </Grid.RowDefinitions>
 
@@ -155,6 +57,17 @@
                     <Button.ContextMenu>
                         <ContextMenu Style="{StaticResource MenuPopup}">
                             <MenuItem Header="影像…" InputGestureText="Ctrl+I" Click="AddImage_Click"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
+                <!-- 查看：结果窗口的键盘入口。右栏标题上也有一个按钮，那个更近；
+                     菜单与 F3 给的是「不想去右栏找/正在用键盘」的情况 -->
+                <Button DockPanel.Dock="Left" Content="查看 ▾" Style="{StaticResource ToolBtn}"
+                        VerticalAlignment="Center" Click="ViewMenu_Click">
+                    <Button.ContextMenu>
+                        <ContextMenu Style="{StaticResource MenuPopup}">
+                            <MenuItem Header="结果与残差…" InputGestureText="F3" Click="OpenResults_Click"/>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
@@ -313,6 +226,14 @@
                         <DockPanel LastChildFill="False">
                             <TextBlock x:Name="InspectorTitle" Text="相对定向"
                                        VerticalAlignment="Center" FontWeight="SemiBold"/>
+
+                            <!-- 结果常驻在这里：解算过的都在，不随模块面板换位置。
+                                 解算前禁用——按不动就不会问「为什么没反应」 -->
+                            <Button x:Name="ResultButton" DockPanel.Dock="Right" Content="结果"
+                                    Style="{StaticResource ResultButton}"
+                                    VerticalAlignment="Center" Margin="8,0,0,0"
+                                    IsEnabled="False" Click="ResultButton_Click"/>
+
                             <Border DockPanel.Dock="Right" VerticalAlignment="Center" CornerRadius="3"
                                     Background="{StaticResource Panel3Brush}" Padding="6,1">
                                 <TextBlock Text="Task" FontSize="10.5" FontFamily="Consolas"
@@ -331,18 +252,6 @@
                                                Foreground="{StaticResource MutBrush}"/>
                                     <TextBlock x:Name="ImageInfoText" Text="未载入" FontSize="11.5"
                                                Foreground="{StaticResource DimBrush}"
-                                               Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </Border>
-
-                            <Border x:Name="PointInfoCard" Background="{StaticResource Panel2Brush}"
-                                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                    CornerRadius="7" Padding="11" Margin="0,0,0,9">
-                                <StackPanel>
-                                    <TextBlock Text="选定像点" FontSize="12"
-                                               Foreground="{StaticResource MutBrush}"/>
-                                    <TextBlock x:Name="PointInfoText" Text="未选择" FontSize="11.5"
-                                               FontFamily="Consolas" Foreground="{StaticResource DimBrush}"
                                                Margin="0,6,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
@@ -376,9 +285,6 @@
                                                          GroupName="InteriorMode" FontSize="11.5"
                                                          IsChecked="True" Checked="InteriorMode_Checked"/>
                                         </StackPanel>
-                                        <TextBlock x:Name="InteriorModeHint" FontSize="10.5"
-                                                   Foreground="{StaticResource DimBrush}"
-                                                   TextWrapping="Wrap" Margin="0,5,0,0"/>
 
                                         <!-- 方式一：参数式 -->
                                         <StackPanel x:Name="ParametricPanel" Visibility="Collapsed" Margin="0,8,0,0">
@@ -412,8 +318,7 @@
                                             </DockPanel>
                                             <TextBlock x:Name="PixelHint" FontSize="10.5"
                                                        Foreground="{StaticResource MutBrush}"
-                                                       Margin="66,0,0,0" TextWrapping="Wrap"
-                                                       Text="按厂家手册填微米，程序内部换成 mm/px"/>
+                                                       Margin="66,0,0,0" TextWrapping="Wrap"/>
                                             <Button Content="应用到当前影像" Click="ApplyParametric_Click"
                                                     Style="{StaticResource ToolBtn}"
                                                     HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
@@ -424,9 +329,6 @@
                                             <TextBlock x:Name="CameraInfoText" Text="未载入相机检校文件"
                                                        FontSize="11.5" Foreground="{StaticResource DimBrush}"
                                                        TextWrapping="Wrap"/>
-                                            <TextBlock FontSize="10.5" Foreground="{StaticResource DimBrush}"
-                                                       TextWrapping="Wrap" Margin="0,4,0,0"
-                                                       Text="在下方「点表」里选一行，再左键在影像上点该框标。"/>
                                             <UniformGrid Columns="2" Margin="0,6,0,0">
                                                 <Button Content="载入相机检校文件…" Click="LoadCamera_Click"
                                                         Style="{StaticResource ToolBtn}"
@@ -458,7 +360,7 @@
                                         </UniformGrid>
 
                                         <!-- 载入的控制点放大影像列表：点一行就在左窗看它 -->
-                                        <Border Background="{StaticResource PanelBrush}"
+                                        <Border x:Name="ZoomImageListBorder" Background="{StaticResource PanelBrush}"
                                                 BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                                                 CornerRadius="5" Padding="4" MaxHeight="128">
                                             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -469,14 +371,6 @@
                                         <TextBlock x:Name="ResectionHint" FontSize="11" Margin="0,6,0,0"
                                                    Foreground="{StaticResource DimBrush}"
                                                    TextWrapping="Wrap"/>
-                                        <Border Background="{StaticResource PanelBrush}"
-                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
-                                            <TextBlock x:Name="ResectionEquationText" FontSize="10.5"
-                                                       FontFamily="Consolas"
-                                                       Foreground="{StaticResource DimBrush}"
-                                                       TextWrapping="Wrap"/>
-                                        </Border>
                                         <Button Content="解算后方交会" Click="SolveResection_Click"
                                                 Style="{StaticResource ToolBtn}"
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
@@ -485,21 +379,9 @@
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
                                     </StackPanel>
 
-                                    <!-- 前方交会 -->
+                                    <!-- 前方交会：只留动作按钮。配对状态与"能不能解"不摆在面板上：
+                                         缺什么由解算闸门在按下时说明，不提前猜 -->
                                     <StackPanel x:Name="IntersectionPanel" Visibility="Collapsed" Margin="0,8,0,0">
-                                        <TextBlock x:Name="IntersectionHint" FontSize="11"
-                                                   Foreground="{StaticResource DimBrush}"
-                                                   TextWrapping="Wrap"/>
-
-                                        <Border Background="{StaticResource PanelBrush}"
-                                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                                                CornerRadius="5" Padding="8" Margin="0,6,0,0">
-                                            <TextBlock x:Name="IntersectionPairText" Text="左片 —　右片 —"
-                                                       FontSize="11" FontFamily="Consolas"
-                                                       Foreground="{StaticResource DimBrush}"
-                                                       TextWrapping="Wrap"/>
-                                        </Border>
-
                                         <Button x:Name="IntersectionSolveButton" Content="解算交会点"
                                                 Click="SolveIntersection_Click"
                                                 Style="{StaticResource ToolBtn}"
@@ -589,33 +471,11 @@
                                                 HorizontalAlignment="Stretch" Margin="0,6,0,0"/>
                                     </StackPanel>
 
-                                    <!-- 其他模块的占位 -->
+                                    <!-- 其他模块的占位：不摆假参数。以前这里写着"迭代限差 0.0001 mm /
+                                         最大迭代 20 / 初值 自动估计"，那组数没有任何代码在用，只是把面板填满 -->
                                     <StackPanel x:Name="GenericTaskPanel" Margin="0,8,0,0">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition/>
-                                                <RowDefinition/>
-                                                <RowDefinition/>
-                                            </Grid.RowDefinitions>
-                                            <TextBlock Grid.Row="0" Text="迭代限差" FontSize="11.5"
-                                                       Foreground="{StaticResource DimBrush}"/>
-                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="0.0001 mm"
-                                                       FontSize="11.5" FontFamily="Consolas"/>
-                                            <TextBlock Grid.Row="1" Text="最大迭代" FontSize="11.5"
-                                                       Foreground="{StaticResource DimBrush}" Margin="0,5,0,0"/>
-                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="20"
-                                                       FontSize="11.5" FontFamily="Consolas" Margin="0,5,0,0"/>
-                                            <TextBlock Grid.Row="2" Text="初值" FontSize="11.5"
-                                                       Foreground="{StaticResource DimBrush}" Margin="0,5,0,0"/>
-                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="自动估计"
-                                                       FontSize="11.5" Margin="0,5,0,0"/>
-                                        </Grid>
-                                        <TextBlock Text="（该模块参数待接入）" FontSize="11"
-                                                   Foreground="{StaticResource DimBrush}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="这一模块还没有参数（未实现）" FontSize="11"
+                                                   Foreground="{StaticResource DimBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -630,7 +490,7 @@
                       VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"
                       ResizeDirection="Rows" Background="{StaticResource Panel3Brush}"
                       BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,1"
-                      Cursor="SizeNS" DragCompleted="BottomSplitter_DragCompleted"
+                      Cursor="SizeNS"
                       ToolTip="拖动可调整底部面板高度"/>
 
         <Border Grid.Row="4" Background="{StaticResource PanelBrush}"
@@ -645,8 +505,6 @@
                             <RadioButton Content="诊断" GroupName="Bottom" Tag="diag"
                                          Style="{StaticResource BottomTab}" IsChecked="True"
                                          Checked="BottomTab_Checked"/>
-                            <RadioButton x:Name="ResTab" Content="结果残差" GroupName="Bottom" Tag="res"
-                                         Style="{StaticResource BottomTab}" Checked="BottomTab_Checked"/>
                             <RadioButton x:Name="BottomTabsLog" Content="日志" GroupName="Bottom" Tag="log"
                                          Style="{StaticResource BottomTab}" Checked="BottomTab_Checked"/>
                         </StackPanel>
@@ -768,63 +626,8 @@
                                    FontSize="12" Foreground="{StaticResource MutBrush}" Margin="0,2"
                                    TextWrapping="Wrap"/>
                     </StackPanel>
-                    <!-- 结果残差：左元素表、右残差表。所有模块共用这一页，列随模块变 -->
-                    <Grid x:Name="ResPanel" Visibility="Collapsed">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-
-                        <!-- 标题只写「任务 · 对象」。成功/迭代几次这类过程信息归日志页 -->
-                        <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="False">
-                            <TextBlock x:Name="ResTitleText" DockPanel.Dock="Left"
-                                       FontSize="11.5" VerticalAlignment="Center"
-                                       Foreground="{StaticResource MutBrush}"
-                                       Text="结果残差 · 尚未解算"/>
-                        </DockPanel>
-
-                        <Grid Grid.Row="1">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="470" MinWidth="240"/>
-                                <ColumnDefinition Width="5"/>
-                                <ColumnDefinition Width="*" MinWidth="240"/>
-                            </Grid.ColumnDefinitions>
-
-                            <!-- 元素表：解出来的是什么 -->
-                            <DataGrid x:Name="ResultGrid" Grid.Column="0"
-                                      Style="{StaticResource ResultGridStyle}">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="项目" Width="108" Binding="{Binding Name}"/>
-                                    <DataGridTextColumn Header="符号" Width="58" Binding="{Binding Symbol}"/>
-                                    <DataGridTextColumn Header="数值" Width="96" Binding="{Binding Value}"/>
-                                    <DataGridTextColumn Header="单位" Width="46" Binding="{Binding Unit}"/>
-                                    <DataGridTextColumn Header="说明" Width="*" MinWidth="80" Binding="{Binding Note}"/>
-                                </DataGrid.Columns>
-                            </DataGrid>
-
-                            <GridSplitter x:Name="ResColumnSplitter" Grid.Column="1" Width="5"
-                                          HorizontalAlignment="Stretch"
-                                          VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"
-                                          ResizeDirection="Columns" Background="Transparent"
-                                          Cursor="SizeWE"/>
-
-                            <!-- 残差表：每个点差多少。列在代码里按模块生成 -->
-                            <DataGrid x:Name="ResidualGrid" Grid.Column="2"
-                                      Style="{StaticResource ResultGridStyle}"/>
-                        </Grid>
-
-                        <TextBlock x:Name="ResNoteText" Grid.Row="2" FontSize="10.5"
-                                   Foreground="{StaticResource DimBrush}" TextWrapping="Wrap"
-                                   Margin="0,6,0,0" Visibility="Collapsed"/>
-
-                        <TextBlock x:Name="ResEmptyText" Grid.Row="1" Panel.ZIndex="2"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   FontSize="11.5" Foreground="{StaticResource DimBrush}"
-                                   Text="尚未解算"/>
-                    </Grid>
                     <!-- 日志：解算过程（迭代次数、σ₀、条件数、对象）都记在这里，
-                         不在结果页上占地方；诊断页只留"要你处理的那句话" -->
+                         不在结果窗口里占地方；诊断页只留"要你处理的那句话" -->
                     <ScrollViewer x:Name="LogPanel" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="LogList">

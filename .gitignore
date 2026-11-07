@@ -36,6 +36,8 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+# 离屏自检与截图的默认输出目录（Snap 的 --out / --result-shot）
+/.verify/
 
 # ===== 目录树生成文件；要提交就删掉这一行 =====
 /tree.txt

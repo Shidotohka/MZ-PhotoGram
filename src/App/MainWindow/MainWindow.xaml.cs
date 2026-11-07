@@ -124,6 +124,8 @@ public partial class MainWindow : Window
 
     private void LoadMenu_Click(object sender, RoutedEventArgs e) => OpenMenu(sender);
 
+    private void ViewMenu_Click(object sender, RoutedEventArgs e) => OpenMenu(sender);
+
     private static void OpenMenu(object sender)
     {
         if (sender is not Button { ContextMenu: { } menu } button) return;
@@ -142,7 +144,6 @@ public partial class MainWindow : Window
         UpdateStatusCounts();
         UpdateProjectTitle();
         ImageInfoText.Text = "未载入";
-        PointInfoText.Text = "未选择";
         DiagSummary.Text = "诊断 · 新建工程";
         DiagSummary.Foreground = DimBadge;
         ClearResult();
@@ -318,19 +319,7 @@ public partial class MainWindow : Window
         HandleIntersectionPick();
         HandleRelativePick();
 
-        var point = Workspace.SelectedPoint;
         UpdateStatusCounts();
-
-        if (point is null)
-        {
-            PointInfoText.Text = "未选择";
-            return;
-        }
-
-        PointInfoText.Text =
-            $"{point.Id}\n像素 {point.PixelX}, {point.PixelY}\n" +
-            $"像平面 {point.PositionMm.X:0.000}, {point.PositionMm.Y:0.000} mm\n" +
-            $"状态 {(point.IsBound ? "已绑定" : "未绑定")}";
     }
 
     // ---------- 底部页签 ----------
@@ -342,7 +331,6 @@ public partial class MainWindow : Window
         var key = rb.Tag as string;
         MeasurePanel.Visibility = key == "meas" ? Visibility.Visible : Visibility.Collapsed;
         DiagPanel.Visibility = key == "diag" ? Visibility.Visible : Visibility.Collapsed;
-        ResPanel.Visibility = key == "res" ? Visibility.Visible : Visibility.Collapsed;
         LogPanel.Visibility = key == "log" ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -361,6 +349,14 @@ public partial class MainWindow : Window
         if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.S)
         {
             SaveProjectAs_Click(sender, e);
+            e.Handled = true;
+            return;
+        }
+
+        // 结果窗口：右栏按钮之外的第二入口。换成别的模块、右栏滚到别处时也能找回来
+        if (e.Key == Key.F3)
+        {
+            OpenResultWindow();
             e.Handled = true;
             return;
         }

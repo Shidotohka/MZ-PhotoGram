@@ -78,7 +78,7 @@ public partial class MainWindow
 
     private void SolveModel_Click(object sender, RoutedEventArgs e) => SolveModelNow();
 
-    /// <summary>求模型点，把结果摆到「结果残差」页，并填点表的模型坐标列。</summary>
+    /// <summary>求模型点，把结果摆到结果窗口，并填点表的模型坐标列。</summary>
     internal ModelIntersectionOutcome SolveModelNow()
     {
         var (left, right) = RelativeImages();
@@ -90,7 +90,7 @@ public partial class MainWindow
         if (!outcome.Success)
         {
             _modelPoints = new Dictionary<string, ModelPointObservation>();
-            ShowResult(FailTable($"模型交会 · {label}", outcome.Message));
+            ShowResult(FailTable(ResultKind.Model, label, $"模型交会 · {label}", outcome.Message));
             GateBlocked("模型交会", outcome.Message);
             RefreshModelTable();
             UpdateModelPanel();

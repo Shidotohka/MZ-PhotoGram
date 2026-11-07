@@ -117,10 +117,6 @@ public partial class MainWindow
             ? Visibility.Collapsed
             : Visibility.Visible;
 
-        // 模型交会与绝对定向都不解算像点：这张卡在这里只是噪音，
-        // 还会把「载入控制点文件…」「求模型点」挤到折叠线以下。
-        PointInfoCard.Visibility = isAbsolute || isModel ? Visibility.Collapsed : Visibility.Visible;
-
         // 「输入检查」是内定向自己的待办清单（框标、δ、相机文件），别的模块不显示它：
         // 各模块只说各自的事，缺前置时由解算前的闸门拦下并写日志。
         InputCheckCard.Visibility = isInterior ? Visibility.Visible : Visibility.Collapsed;
@@ -148,13 +144,14 @@ public partial class MainWindow
         if (!isResection && !isModel) SetActiveGcp(null);
 
         RefreshPointTable();
+        // 「结果 (N)」说的是**当前这一步**有几份：切模块就得跟着变
+        UpdateResultButton();
         if (isResection) UpdateResectionPanel();
         if (isRelative) UpdateRelativePanel();
         if (isAbsolute) UpdateAbsolutePanel();
 
         // 离开前方交会就把配对清掉：留着两个临时像点却不在这个模块，谁也说不清它们是什么
-        if (isIntersection) UpdateIntersectionPanel();
-        else ClearIntersectionPair();
+        if (!isIntersection) ClearIntersectionPair();
 
         // 相对定向一样：没落成一整对的那半个点，离开模块就收走
         if (!isRelative) CancelRelativePair();

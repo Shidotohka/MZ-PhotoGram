@@ -1,0 +1,108 @@
+<Window x:Class="Photogrammetry.App.ResultWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="结果与残差" Width="1180" Height="660" MinWidth="980" MinHeight="440"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource BgBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="12.5"
+        Foreground="{StaticResource TextBrush}"
+        TextOptions.TextFormattingMode="Display">
+
+    <!-- 根元素用 Border + Padding 留白，不用 Grid.Margin：离屏截图（Snap 的结果窗口截图）
+         渲染的是根元素本身，Margin 挂在根上会被切掉，截图就没有四周留白了。 -->
+    <Border Padding="14">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- 工具条：对象下拉只列**当前这一步**的结果。
+             不摆一个跨模块的结果列表：模型坐标与地面坐标并排在一起，比着比着就混了；
+             而且那一栏会挤掉表格的宽度。换一步看结果，回主窗切模块再按「结果」。 -->
+        <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,10">
+            <StackPanel x:Name="ObjectPanel" DockPanel.Dock="Left" Orientation="Horizontal"
+                        VerticalAlignment="Center">
+                <TextBlock Text="对象" FontSize="11.5" Foreground="{StaticResource DimBrush}"
+                           VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="ObjectBox" Width="250" Style="{StaticResource MethodCombo}"
+                          DisplayMemberPath="TargetId" SelectionChanged="Object_SelectionChanged"/>
+            </StackPanel>
+
+            <TextBlock x:Name="StoreSummary" DockPanel.Dock="Left" FontSize="11.5"
+                       Foreground="{StaticResource DimBrush}" VerticalAlignment="Center"
+                       Margin="12,0,0,0"/>
+
+            <Button DockPanel.Dock="Right" Content="关闭" Click="Close_Click"
+                    Style="{StaticResource ToolBtn}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <Button DockPanel.Dock="Right" Content="复制" Click="Copy_Click"
+                    Style="{StaticResource ToolBtn}" VerticalAlignment="Center" Margin="4,0,0,0"
+                    ToolTip="把当前这份结果与残差按制表符分隔复制到剪贴板（可直接粘进 Excel）"/>
+            <CheckBox x:Name="AutoOpenCheck" DockPanel.Dock="Right" Content="解算后自动打开"
+                      FontSize="11.5" Foreground="{StaticResource MutBrush}"
+                      VerticalAlignment="Center" Margin="0,0,8,0"
+                      Checked="AutoOpen_Changed" Unchecked="AutoOpen_Changed"/>
+        </DockPanel>
+
+        <!-- 标题只写「任务 · 对象」；过程信息归日志（ADR-21） -->
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock x:Name="DetailTitle" Grid.Row="0" FontWeight="SemiBold"
+                       FontSize="13" Margin="0,0,0,8"/>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="520" MinWidth="340"/>
+                    <ColumnDefinition Width="5"/>
+                    <ColumnDefinition Width="*" MinWidth="300"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 元素表：解出来的是什么 -->
+                <DataGrid x:Name="ResultGrid" Grid.Column="0"
+                          Style="{StaticResource ResultGridStyle}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="项目" Width="108" Binding="{Binding Name}"/>
+                        <DataGridTextColumn Header="符号" Width="58" Binding="{Binding Symbol}"/>
+                        <DataGridTextColumn Header="数值" Width="124" Binding="{Binding Value}"/>
+                        <DataGridTextColumn Header="单位" Width="50" Binding="{Binding Unit}"/>
+                        <!-- 说明这一列装的是口径与警告，一行放不下就省略号 + 悬停看全文：
+                             不为了让长句整行摆下把行高撑成两三行（一张表翻起来会比省略号更烦） -->
+                        <DataGridTextColumn Header="说明" Width="*" MinWidth="80" Binding="{Binding Note}">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="ToolTip" Value="{Binding Note}"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter x:Name="ColumnSplitter" Grid.Column="1" Width="5"
+                              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              ResizeBehavior="PreviousAndNext" ResizeDirection="Columns"
+                              Background="Transparent" Cursor="SizeWE"/>
+
+                <!-- 残差表：每个点差多少。列在代码里按模块生成 -->
+                <DataGrid x:Name="ResidualGrid" Grid.Column="2"
+                          Style="{StaticResource ResultGridStyle}"/>
+
+                <TextBlock x:Name="EmptyText" Grid.ColumnSpan="3"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           FontSize="12" Foreground="{StaticResource DimBrush}"
+                           TextAlignment="Center" IsHitTestVisible="False"
+                           Text="这一步还没有结果"/>
+            </Grid>
+
+            <TextBlock x:Name="NoteText" Grid.Row="2" FontSize="10.5"
+                       Foreground="{StaticResource DimBrush}" TextWrapping="Wrap"
+                       Margin="0,8,0,0" Visibility="Collapsed"/>
+        </Grid>
+    </Grid>
+    </Border>
+</Window>

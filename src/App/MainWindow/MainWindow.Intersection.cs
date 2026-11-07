@@ -32,53 +32,6 @@ public partial class MainWindow
     /// <summary>防止「删旧点 → 触发 SelectionChanged → 又回到这里」的递归。</summary>
     private bool _interPicking;
 
-    /// <summary>刷新配对状态与「解算」按钮的可用性。</summary>
-    private void UpdateIntersectionPanel()
-    {
-        if (IntersectionPanel is null) return;
-
-        IntersectionPairText.Text =
-            DescribeSide("左", _interLeftImage, _interLeft) + "\n" +
-            DescribeSide("右", _interRightImage, _interRight);
-
-        if (Workspace.VisibleViews().Count() != 2)
-        {
-            IntersectionHint.Text = "前方交会要两张片：把左片拖进左窗、右片拖进右窗。";
-            IntersectionSolveButton.IsEnabled = false;
-            return;
-        }
-
-        // 用真正的解算入口做一次「能不能解」的判定，失败原因与解算时完全一致，
-        // 不在界面里另写一套条件——那种写法迟早会和流程层对不上。
-        var probe = IntersectionTask.Solve(
-            _interLeftImage, _interRightImage, PixelOf(_interLeft), PixelOf(_interRight));
-
-        IntersectionSolveButton.IsEnabled = probe.Failure == IntersectionFailure.None;
-        IntersectionHint.Text = probe.Failure switch
-        {
-            IntersectionFailure.None => "两点都就位，可以解算。",
-
-            // 「左窗还没有影像」这种话对新手不够用，直接告诉他怎么开始
-            IntersectionFailure.NoLeftImage or IntersectionFailure.NoRightImage
-                => "前方交会要两张片：把左片拖进左窗、右片拖进右窗。",
-
-            _ => probe.Message,
-        };
-    }
-
-    /// <summary>一行描述：哪个窗、哪张片、点在哪、能不能用。窄栏里别写太长，会折得看不清。</summary>
-    private static string DescribeSide(string slot, ImageItem? image, ImagePoint? point)
-    {
-        if (image is null) return $"{slot} —　无影像";
-
-        var flags = (image.Interior is { IsValid: true } ? "内✓" : "内✗") + " " +
-                    (image.Exterior is not null ? "外✓" : "外✗");
-
-        return point is null
-            ? $"{slot} {image.Id}　未点　{flags}"
-            : $"{slot} {image.Id}　({point.PixelX}, {point.PixelY})　{flags}";
-    }
-
     /// <summary>用户在一个视窗里选中/新建了像点。判断属于左窗还是右窗，记下来。</summary>
     private void HandleIntersectionPick()
     {
@@ -115,8 +68,6 @@ public partial class MainWindow
         {
             _interPicking = false;
         }
-
-        UpdateIntersectionPanel();
     }
 
     /// <summary>清空配对：连同影像上那两个临时像点一起收走，不留没人认领的点。</summary>
@@ -143,8 +94,6 @@ public partial class MainWindow
         {
             _interPicking = false;
         }
-
-        UpdateIntersectionPanel();
     }
 
     private void ClearIntersectionPair_Click(object sender, RoutedEventArgs e) => ClearIntersectionPair();
@@ -180,11 +129,21 @@ public partial class MainWindow
 
         if (!run.Success)
         {
-            ShowResult(FailTable(
-                $"前方交会 · {_interLeftImage?.Id ?? "—"} / {_interRightImage?.Id ?? "—"}", run.Message));
-            LogSolve("前方交会", PairName(), false, run.Message);
-            DiagSummary.Text = "✗ " + run.Message;
-            DiagSummary.Foreground = ErrBadge;
+            if (run.Failure == IntersectionFailure.Solver)
+            {
+                ShowResult(FailTable(ResultKind.Intersection, PairName(),
+                    $"前方交会 · {_interLeftImage?.Id ?? "—"} / {_interRightImage?.Id ?? "—"}", run.Message));
+                LogSolve("前方交会", PairName(), false, run.Message);
+                DiagSummary.Text = "✗ " + run.Message;
+                DiagSummary.Foreground = ErrBadge;
+            }
+            else
+            {
+                // 前置没满足（缺片、缺内外方位、没点、点出框、焦距不同）：由闸门一句话说明，
+                // 不往结果集合里塞一份"未解出"——那还不是一次解算
+                GateBlocked("前方交会", run.Message);
+            }
+
             return run;
         }
 
@@ -301,7 +260,7 @@ public partial class MainWindow
         new MatchReportWindow(_lastMatchRun) { Owner = this }.Show();
     }
 
-    /// <summary>把一次「全工作区自动交会」摆到结果页上：左边概要、右边逐点。</summary>
+    /// <summary>把一次「全工作区自动交会」摆到结果窗口里：左边概要、右边逐点。</summary>
     private void ShowAutoIntersect(AutoIntersectBatchRun run, int preparedCount)
     {
         _lastMatchRun = run.Success ? run : null;
@@ -314,7 +273,7 @@ public partial class MainWindow
 
         var title = model ? "前方交会 · 全部影像（模型坐标）" : "前方交会 · 全部影像";
 
-        // 跳过的影像与像对级提醒都进日志：一句一条，不铺在结果页上。
+        // 跳过的影像与像对级提醒都进日志：一句一条，不铺在结果窗口里。
         foreach (var skip in run.Skipped) Log("!", $"{skip.ImageId}：{skip.Reason}");
         foreach (var warning in run.Warnings) Log("!", warning);
 
@@ -334,7 +293,7 @@ public partial class MainWindow
             var message = run.Skipped.Count == 0
                 ? "所有像对都没配上点。"
                 : $"所有像对都没配上点（{run.Skipped.Count} 张影像被跳过，原因见日志）。";
-            ShowResult(FailTable(title, message));
+            ShowResult(FailTable(ResultKind.Intersection, "全部影像", title, message));
             LogSolve("自动匹配", "全部影像", false, message);
             DiagSummary.Text = "✗ " + message;
             DiagSummary.Foreground = ErrBadge;
@@ -349,7 +308,14 @@ public partial class MainWindow
             .Take(200)
             .ToList();
 
-        var table = new ResultTable { Title = title }
+        var table = new SolveResult
+            {
+                // 自动匹配出的是前方交会点，归在「前方交会」这一步下；
+                // 对象写「全部影像」，与手工指定像对的结果区分开
+                Kind = ResultKind.Intersection,
+                TargetId = "全部影像",
+                Title = title,
+            }
             .Num("匹配对", "n", run.Matched, "0", "对")
             .Num("交会点", "n", points.Count, "0", "点")
             .Num("异常", "n", abnormal.Count, "0", "个");

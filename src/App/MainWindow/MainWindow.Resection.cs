@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Windows;
 using Photogrammetry.Core;
 using Photogrammetry.Core.Tasks;
@@ -18,36 +17,28 @@ public partial class MainWindow
 {
     // ---------- 后方交会 ----------
 
-    /// <summary>刷「后方交会」面板的提示：能解就报能解，不能解就说清缺什么。</summary>
+    /// <summary>刷「后方交会」面板：只留一行「能不能解」，缺什么就说什么。</summary>
     private void UpdateResectionPanel()
     {
-        var image = CurrentImage;
-        ResectionEquationText.Text =
-            "x = -f·U/W,  y = -f·V/W\n" +
-            "[U V W]ᵀ = R·[X-Xs, Y-Ys, Z-Zs]ᵀ\n" +
-            "R = Rκ·Rω·Rφ（教材形式）";
+        if (ResectionHint is null) return;
 
+        var image = CurrentImage;
         if (image is null)
         {
-            ResectionHint.Text = "尚未载入影像。";
+            ResectionHint.Text = "未载入影像。";
+            return;
+        }
+
+        if (image.Interior is not { IsValid: true })
+        {
+            ResectionHint.Text = "缺内方位：先做内定向。";
             return;
         }
 
         var prep = ResectionTask.Prepare(image, _project.Gcps);
-        var text = $"影像 {image.Id}：可用于解算的控制点 {prep.Count} 个";
-
-        if (image.Interior is { } io && io.IsValid)
-            text += $"\nf = {io.FocalLength:0.###} mm　x0 = {io.X0:0.####}　y0 = {io.Y0:0.####}　δ = {io.PixelSizeMm:0.######} mm/px";
-        else
-            text += "\n内方位元素缺失：先在「内定向」里解算。";
-
-        if (prep.Count < NativeAlgorithms.MinControlPoints)
-            text += $"\n至少需要 {NativeAlgorithms.MinControlPoints} 个才能解算。";
-        if (prep.Skipped.Count > 0)
-            text += "\n未参与：" + string.Join("，", prep.Skipped.Take(6)) +
-                    (prep.Skipped.Count > 6 ? $" 等 {prep.Skipped.Count} 项" : "");
-
-        ResectionHint.Text = text;
+        ResectionHint.Text = prep.Count >= NativeAlgorithms.MinControlPoints
+            ? $"可解：{prep.Count} 个控制点"
+            : $"控制点 {prep.Count} 个，至少 {NativeAlgorithms.MinControlPoints} 个";
     }
 
     private void SolveResection_Click(object sender, RoutedEventArgs e) => SolveResectionNow();
@@ -104,7 +95,7 @@ public partial class MainWindow
         var result = run.Result!;
         var image = CurrentImage!;
 
-        // 外方位与逐点残差进「结果残差」页；坐标系的统一（判手性、换轴）在 Core 里做完就算完，
+        // 外方位与逐点残差进结果窗口；坐标系的统一（判手性、换轴）在 Core 里做完就算完，
         // 界面上只给一套数学系坐标，不再解释是怎么换过来的
         ShowResult(ResectionResult(image, result));
 

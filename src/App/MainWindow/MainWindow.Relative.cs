@@ -398,7 +398,7 @@ public partial class MainWindow
 
     private void SolveRelative_Click(object sender, RoutedEventArgs e) => SolveRelativeNow();
 
-    /// <summary>跑一次相对定向，把结果摆到「结果残差」页。</summary>
+    /// <summary>跑一次相对定向，把结果摆到结果窗口。</summary>
     internal RelativeRun SolveRelativeNow()
     {
         var (left, right) = RelativeImages();
@@ -406,7 +406,8 @@ public partial class MainWindow
 
         if (!run.Success)
         {
-            ShowResult(FailTable($"相对定向 · {left?.Id ?? "—"} → {right?.Id ?? "—"}", run.Message));
+            ShowResult(FailTable(ResultKind.Relative, $"{left?.Id ?? "—"} → {right?.Id ?? "—"}",
+                $"相对定向 · {left?.Id ?? "—"} → {right?.Id ?? "—"}", run.Message));
             GateBlocked("相对定向", run.Message);
             return run;
         }
@@ -420,7 +421,7 @@ public partial class MainWindow
 
         if (run.Warnings.Count > 0)
         {
-            // 提醒的全文进日志：结果页只留「是什么」，解释摆在那里会盖住表
+            // 提醒的全文进日志：结果窗口只留「是什么」，解释摆在那里会盖住表
             foreach (var warning in run.Warnings) Log("!", warning);
             DiagSummary.Text = $"! 相对定向完成，但有 {run.Warnings.Count} 条提醒（见日志）";
             DiagSummary.Foreground = WarnBadge;

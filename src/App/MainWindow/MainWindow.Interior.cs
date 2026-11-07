@@ -87,10 +87,6 @@ public partial class MainWindow
         ParametricPanel.Visibility = fiducial ? Visibility.Collapsed : Visibility.Visible;
         FiducialPanel.Visibility = fiducial ? Visibility.Visible : Visibility.Collapsed;
 
-        InteriorModeHint.Text = fiducial
-            ? "在影像上量 8 个框标，解 6 个仿射系数。能吸收扫描比例、旋转与主点偏差。"
-            : "直接代入检定给出的内参，不量框标。精度完全取决于检定值本身准不准。";
-
         Workspace.SetFiducialMode(fiducial);
 
         if (fiducial) EnsureFiducialPicking();
@@ -141,18 +137,25 @@ public partial class MainWindow
         // 面板上按手册填微米，模型里一律存 mm/px——共线方程的 f 是毫米，两者必须同量纲
         var pixelMm = pixelUm / 1000.0;
 
-        image.Interior = new InteriorOrientation
+        var io = new InteriorOrientation
         {
             FocalLength = f,
             X0 = x0,
             Y0 = y0,
             PixelSizeMm = pixelMm,
         };
+        image.Interior = io;
         image.Status = ImageStatus.InteriorDone;
 
         OnImageLoaded(null, image);
         RefreshTree();
         UpdateFiducialUi();
+
+        // 参数式也是内定向的一次结论：同样留一份结果，换片/复核/写报告时看得到。
+        // 它没有残差与 σ₀（没有多余观测），页脚写明这一点。
+        ShowResult(ParametricInteriorResult(image, io));
+        LogSolve("内定向", image.Id, true,
+            $"参数式　f {f:0.###} mm　δ {pixelMm:0.000000} mm/px　x0 {x0:+0.0000;-0.0000}　y0 {y0:+0.0000;-0.0000}");
 
         DiagSummary.Text = $"✓ 已应用参数式内参：f = {f:0.###} mm，δ = {pixelUm:0.###} µm（{pixelMm:0.000000} mm/px）";
         DiagSummary.Foreground = OkBadge;
@@ -165,7 +168,7 @@ public partial class MainWindow
 
         PixelHint.Text = TryRead((TextBox)sender, out var um) && um > 0
             ? $"= {um / 1000.0:0.000000} mm/px"
-            : "按手册填微米";
+            : string.Empty;
     }
 
     private static bool TryRead(TextBox box, out double value) =>
@@ -220,7 +223,7 @@ public partial class MainWindow
                 ? "多半是框标编号与点位对不上：对照点表里的方位（如「右下角」），逐个核对后重新点一遍。"
                 : string.Empty;
 
-            ShowResult(FailTable($"内定向 · {image.Id}",
+            ShowResult(FailTable(ResultKind.Interior, image.Id, $"内定向 · {image.Id}",
                 $"（{result.ErrorCode}）{result.Message}" + (hint.Length > 0 ? "\n" + hint : "")));
             LogSolve("内定向", image.Id, false, $"rc = {result.ErrorCode}　{result.Message}");
             DiagSummary.Text = $"✗ 内定向失败：{result.Message}";
@@ -238,7 +241,7 @@ public partial class MainWindow
         };
         image.Status = ImageStatus.InteriorDone;
 
-        // 结果与逐点残差进「结果残差」页，右栏不再摆结果
+        // 结果与逐点残差进结果窗口，右栏不再摆结果
         ShowResult(InteriorResult(image, result));
 
         LogSolve("内定向", image.Id, true,

@@ -78,6 +78,14 @@ internal static class Program
             return;
         }
 
+        // 结果集合的覆盖语义：不开窗口，只验「不同对象并存、同一对象覆盖、换工程清空」。
+        // 这是这次改动的根——旧结果页只有一个槽，第二步会把第一步顶掉。
+        if (args.Any(a => string.Equals(a, "--results", StringComparison.OrdinalIgnoreCase)))
+        {
+            ResultStoreCheck();
+            return;
+        }
+
         if (args.Any(a => string.Equals(a, "--control", StringComparison.OrdinalIgnoreCase)))
         {
             ControlCheck(Get(args, "--gcp"),
@@ -292,7 +300,7 @@ internal static class Program
         }
 
         // 绝对定向的界面端到端：铺相对定向那套布景 → 造 8 个控制点（2 个检查点）
-        // → 切到「绝对定向」→ 按解算 → 看结果页
+        // → 切到「绝对定向」→ 按解算 → 看结果窗口
         if (args.Any(a => string.Equals(a, "--absolute-demo", StringComparison.OrdinalIgnoreCase)))
         {
             RunRelativeDemo(win);
@@ -340,7 +348,7 @@ internal static class Program
             Pump(win);
         }
 
-        // 内定向的界面端到端：填框标量测 → 按「解算内定向」→ 看结果页上有没有那几行
+        // 内定向的界面端到端：填框标量测 → 按「解算内定向」→ 看结果窗口上有没有那几行
         if (args.Any(a => string.Equals(a, "--interior-demo", StringComparison.OrdinalIgnoreCase)))
         {
             RunInteriorDemo(win, Get(args, "--camera"));
@@ -384,6 +392,34 @@ internal static class Program
         }
 
         Console.WriteLine("saved " + outPath);
+
+        // 结果窗口是独立的顶层窗口，不在主窗的渲染树里；要单独 Render 一次才能看它长什么样。
+        // 只用于文档截图与人工核对，正常截图流程不受影响。
+        if (Get(args, "--result-shot") is { } resultShotPath)
+        {
+            if (win.ResultWindowForTooling is { Content: FrameworkElement resultRoot } resultWindow)
+            {
+                resultWindow.UpdateLayout();
+                Pump(win);
+
+                var rw = (int)Math.Round(resultRoot.ActualWidth);
+                var rh = (int)Math.Round(resultRoot.ActualHeight);
+                var resultRtb = new RenderTargetBitmap(rw, rh, 96, 96, PixelFormats.Pbgra32);
+                resultRtb.Render(resultRoot);
+
+                var resultEncoder = new PngBitmapEncoder();
+                resultEncoder.Frames.Add(BitmapFrame.Create(resultRtb));
+                using var resultStream = File.Create(resultShotPath);
+                resultEncoder.Save(resultStream);
+
+                Console.WriteLine($"saved {resultShotPath}（结果窗口 {rw}x{rh}）");
+            }
+            else
+            {
+                Console.WriteLine("[FAIL] 没有打开的结果窗口，--result-shot 拍不到东西");
+                Environment.ExitCode = 1;
+            }
+        }
 
         if (Get(args, "--openmenu") is { } menuName && FindButton(win, menuName) is { ContextMenu: { } menu } button)
         {
@@ -1133,10 +1169,10 @@ internal static class Program
     /// </summary>
     /// <summary>
     /// 内定向的界面端到端：按一份<b>已知</b>内参把相机框标反算成像素、填进框标量测，
-    /// 再按界面上那个「解算内定向」按钮，最后看「结果残差」页上列出来的东西对不对。
+    /// 再按界面上那个「解算内定向」按钮，最后看「结果窗口」里列出来的东西对不对。
     ///
     /// <para>已知内参是临时定的（δ 按"框标铺满画幅 90%"算），因为这一条测的是
-    /// <b>按钮 → 解算 → 结果页</b>这条线接不接得上，不是内定向数学本身——
+    /// <b>按钮 → 解算 → 结果窗口</b>这条线接不接得上，不是内定向数学本身——
     /// 那个由 <c>--fiducial</c> 对着 <c>Data/sim/m2</c> 的真值验。填进去的三个数
     /// 解完应当原样回来，这顺带说明界面显示的确实是解算值。</para>
     /// </summary>
@@ -1206,13 +1242,13 @@ internal static class Program
         var shown = panel.Title.Contains("内定向") && names.Contains("像元尺寸") &&
                     names.Contains("主点 x") && panel.Rows.Count == camera.Fiducials.Count;
         Console.WriteLine(shown
-            ? $"[PASS] 结果页：{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差"
-            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
+            ? $"[PASS] 结果窗口：{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差"
+            : $"[FAIL] 结果窗口不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
               $"残差={panel.Rows.Count}（应有 {camera.Fiducials.Count}）");
         if (!shown) Environment.ExitCode = 1;
 
         // 显示出来的三个数必须就是解出来的，不能是"按进去的数重新写了一遍"
-        static double ValueOf(IReadOnlyList<MainWindow.ResultRow> items, string symbol) =>
+        static double ValueOf(IReadOnlyList<ResultRow> items, string symbol) =>
             double.TryParse(items.FirstOrDefault(r => r.Symbol == symbol)?.Value,
                 NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
                 ? v
@@ -1243,7 +1279,7 @@ internal static class Program
     }
 
     /// <summary>
-    /// 过程信息（成功与否、迭代几次）不该占结果页：结果页只有「任务 · 对象」，
+    /// 过程信息（成功与否、迭代几次）不该占结果：结果窗口里只有「任务 · 对象」，
     /// 迭代/σ₀/条件数进日志页。这条检查两件事都盯住。
     /// </summary>
     private static void CheckProcessInfo(MainWindow win, string module)
@@ -1251,8 +1287,8 @@ internal static class Program
         var title = win.SnapshotResult().Title;
         var clean = !title.Contains("成功") && !title.Contains("迭代") && !title.Contains("轮");
         Console.WriteLine(clean
-            ? $"[PASS] 结果页标题只有对象：{title}"
-            : $"[FAIL] 过程信息还留在结果页标题上：[{title}]");
+            ? $"[PASS] 结果标题只有对象：{title}"
+            : $"[FAIL] 过程信息还留在结果标题上：[{title}]");
         if (!clean) Environment.ExitCode = 1;
 
         var line = win.LogLines.LastOrDefault(l => l.Contains(module));
@@ -1361,13 +1397,13 @@ internal static class Program
 
         var panel = win.SnapshotResult();
         var names = panel.Items.Select(r => r.Name).ToList();
-        Console.WriteLine($"结果页：{panel.Title}　{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差");
+        Console.WriteLine($"结果窗口：{panel.Title}　{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差");
 
         var shown = panel.Title.Contains("前方交会") && names.Contains("交会角") &&
                     panel.Rows.Count == 2;
         Console.WriteLine(shown
-            ? $"[PASS] 结果页显示了交会元素与两行残差"
-            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 残差={panel.Rows.Count}");
+            ? $"[PASS] 结果窗口显示了交会元素与两行残差"
+            : $"[FAIL] 结果窗口不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 残差={panel.Rows.Count}");
         if (!shown) Environment.ExitCode = 1;
 
         // 界面上的数必须是解算出来的那个数，不是"看起来像"的另一个数
@@ -1379,12 +1415,11 @@ internal static class Program
             : $"[FAIL] 交会点 X 显示 [{xRow?.Value}]，解算结果是 {expectX}");
         if (!valueOk) Environment.ExitCode = 1;
 
-        // 结果页在折叠线以下，解完必须自己翻出来
-        var tab = win.FindName("ResTab") as RadioButton;
-        Console.WriteLine(tab?.IsChecked == true
-            ? "[PASS] 解完自动切到「结果残差」页"
-            : "[FAIL] 没切到结果页，用户看不到结果");
-        if (tab?.IsChecked != true) Environment.ExitCode = 1;
+        // 结果不再住底部页签：解完要自己弹出来，否则用户不知道算完了
+        Console.WriteLine(win.ResultWindowIsOpen
+            ? "[PASS] 解完自动打开结果窗口"
+            : "[FAIL] 没打开结果窗口，用户看不到结果");
+        if (!win.ResultWindowIsOpen) Environment.ExitCode = 1;
 
         CheckProcessInfo(win, "前方交会");
     }
@@ -1538,13 +1573,13 @@ internal static class Program
 
         var panel = win.SnapshotResult();
         var names = panel.Items.Select(r => r.Name).ToList();
-        Console.WriteLine($"结果页：{panel.Title}　{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差");
+        Console.WriteLine($"结果窗口：{panel.Title}　{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差");
 
         var shown = panel.Title.Contains("相对定向") && names.Contains("基线") &&
                     panel.Rows.Count == count && panel.Headers.FirstOrDefault() == "点号";
         Console.WriteLine(shown
-            ? $"[PASS] 结果页显示了相对方位元素与 {panel.Rows.Count} 行上下视差"
-            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
+            ? $"[PASS] 结果窗口显示了相对方位元素与 {panel.Rows.Count} 行上下视差"
+            : $"[FAIL] 结果窗口不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
               $"残差={panel.Rows.Count} 列=[{string.Join("/", panel.Headers)}]");
         if (!shown) Environment.ExitCode = 1;
 
@@ -1659,7 +1694,7 @@ internal static class Program
     /// 离线分析一个 <c>.pht</c>：不开窗口、不解码影像，直接拿工程里存着的
     /// 「像点 + 相对定向 + 控制点」重算模型交会与绝对定向。
     ///
-    /// <para>为什么要有它：界面上的结果页只给三维合量的 rms，而交会角小的时候高程误差被
+    /// <para>为什么要有它：界面上的结果窗口只给三维合量的 rms，而交会角小的时候高程误差被
     /// $H/B$ 放大，平面与高程能差一个量级——数字拆开才看得出瓶颈在哪。</para>
     /// </summary>
     private static void AnalyzeProject(string path, bool leaveOneOut = false)
@@ -1884,8 +1919,8 @@ internal static class Program
         var shown = panel.Title.Contains("绝对定向") && names.Contains("尺度") &&
                     panel.Rows.Count == ground.Count;
         Console.WriteLine(shown
-            ? $"[PASS] 结果页显示了七参数与 {panel.Rows.Count} 行不符值"
-            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
+            ? $"[PASS] 结果窗口显示了七参数与 {panel.Rows.Count} 行不符值"
+            : $"[FAIL] 结果窗口不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
         if (!shown) Environment.ExitCode = 1;
 
         var header = panel.Headers.FirstOrDefault();
@@ -1893,10 +1928,10 @@ internal static class Program
             ? "[PASS] 不符值表的列头是点号"
             : $"[FAIL] 不符值表列头是「{header}」");
 
-        // 平面/高程拆开 + 判据换成像素：这两行是这次加的，得在真的结果页上看到
+        // 平面/高程拆开 + 判据换成像素：这两行是这次加的，得在真的结果窗口上看到
         var hasSplit = names.Contains("不符值（平面）") && names.Contains("不符值（高程）");
         Console.WriteLine(hasSplit
-            ? "[PASS] 结果页把平面与高程分开列了"
+            ? "[PASS] 结果窗口把平面与高程分开列了"
             : $"[FAIL] 没找到平面的那两行：元素=[{string.Join("/", names)}]");
         if (!hasSplit) Environment.ExitCode = 1;
 
@@ -2069,8 +2104,8 @@ internal static class Program
         var shown = panel.Title.Contains("模型交会") && names.Contains("最差交会角") &&
                     panel.Rows.Count == ground.Count;
         Console.WriteLine(shown
-            ? $"[PASS] 结果页显示了模型点与 {panel.Rows.Count} 行坐标"
-            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
+            ? $"[PASS] 结果窗口显示了模型点与 {panel.Rows.Count} 行坐标"
+            : $"[FAIL] 结果窗口不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
         if (!shown) Environment.ExitCode = 1;
 
         // 模型交会表上的右键「设为检查点」——这条路上曾经读错了表（只看控制点表），
@@ -2107,6 +2142,28 @@ internal static class Program
                 : $"[FAIL] 绝对定向没解出来：{run.Message}");
             if (!run.Success) Environment.ExitCode = 1;
         }
+
+        // 这次改动要的正是这一条：相对定向算完再算模型交会，前一份还在。
+        // 旧的结果窗口只有一个槽，第二步一算第一步就没了，想回看只能重算。
+        var results = win.SnapshotResults();
+        var hasRelative = results.Any(r => r.Kind == ResultKind.Relative);
+        var hasModel = results.Any(r => r.Kind == ResultKind.Model);
+        Console.WriteLine(hasRelative && hasModel
+            ? $"[PASS] 两步的结果并存（{results.Count} 份：{string.Join("、", results.Select(r => r.Title))}）"
+            : $"[FAIL] 结果集合丢了前一份：{results.Count} 份，" +
+              $"[{string.Join("、", results.Select(r => r.Kind?.ToString() ?? "—"))}]");
+        if (!hasRelative || !hasModel) Environment.ExitCode = 1;
+
+        Console.WriteLine(win.ResultWindowIsOpen
+            ? "[PASS] 解完自动打开结果窗口"
+            : "[FAIL] 结果窗口没打开，用户看不到结果");
+        if (!win.ResultWindowIsOpen) Environment.ExitCode = 1;
+
+        // 窗口按模块划作用域：最后解的是绝对定向，窗口就该停在绝对定向
+        Console.WriteLine(win.ResultWindowScope == ResultKind.Absolute
+            ? "[PASS] 结果窗口跟着切到最后解的那一步（绝对定向）"
+            : $"[FAIL] 结果窗口停在 {win.ResultWindowScope?.ToString() ?? "（未打开）"}");
+        if (win.ResultWindowScope != ResultKind.Absolute) Environment.ExitCode = 1;
 
         // 断言完了切回模型交会，并把底部页签停到「点表」：截图要展示模型坐标
         if (win.SelectModuleForTooling("模型交会"))
@@ -2199,14 +2256,14 @@ internal static class Program
             ? "[PASS] 刺点 → 像平面坐标 → 后方交会，外方位回到整像素量化误差以内"
             : "[FAIL] 外方位恢复误差超出整像素量化能解释的范围");
 
-        // 结果残差页：外方位六个元素 + 每个控制点一行残差
+        // 结果窗口：外方位六个元素 + 每个控制点一行残差
         var panel = win.SnapshotResult();
         var names = panel.Items.Select(r => r.Name).ToList();
         var shownResult = panel.Title.Contains("后方交会") && names.Contains("摄影中心 X") &&
                           names.Contains("姿态角 κ") && panel.Rows.Count == gcps.Count;
         Console.WriteLine(shownResult
-            ? $"[PASS] 结果页：{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差"
-            : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
+            ? $"[PASS] 结果窗口：{panel.Items.Count} 行元素、{panel.Rows.Count} 行残差"
+            : $"[FAIL] 结果窗口不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] " +
               $"残差={panel.Rows.Count}（应有 {gcps.Count}）");
 
         var xsRow = panel.Items.FirstOrDefault(r => r.Name == "摄影中心 X");
@@ -3006,6 +3063,16 @@ internal static class Program
         Check("「输入检查」里两种单位都给了",
             text.Contains("µm") && text.Contains("mm/px"), text.Replace("\n", " | "));
 
+        // 参数式也要留一份结果：以前它只是把四个数抄进模型，结果窗口里什么都没有
+        var parametric = win.SnapshotResult();
+        var recorded = parametric.Kind == ResultKind.Interior &&
+                       parametric.Items.Any(item => item.Symbol == "f") &&
+                       parametric.Rows.Count == 0;
+        Check("参数式内定向也留了一份结果", recorded,
+            $"{parametric.Title}：{parametric.Items.Count} 行元素、{parametric.Rows.Count} 行残差");
+        Check("结果窗口跟着切到内定向", win.ResultWindowScope == ResultKind.Interior,
+            win.ResultWindowScope?.ToString() ?? "（未打开）");
+
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "INTERIOR-UM PASS" : $"INTERIOR-UM FAIL（{failures} 项）");
         if (failures != 0) Environment.ExitCode = 1;
@@ -3738,6 +3805,106 @@ internal static class Program
         {
             foreach (var f in files) if (File.Exists(f)) File.Delete(f);
         }
+
+        Console.WriteLine(failures == 0 ? "SELFTEST PASS" : $"SELFTEST FAIL ({failures})");
+        Environment.ExitCode = failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// 结果集合的覆盖语义（ADR-25）。旧的结果窗口只有一个槽：第一步算完再看第二步，
+    /// 第一步的结果就被顶掉了。这里钉住新约定——<b>不同对象并存、同一对象覆盖、换工程清空</b>。
+    ///
+    /// <para>不开窗口：窗口只是这个集合的视图，视图的事由 <c>--model-demo</c> /
+    /// <c>--absolute-demo</c> 那条端到端去验（那里会连着解两步）。</para>
+    /// </summary>
+    private static void ResultStoreCheck()
+    {
+        Console.WriteLine("结果集合────────────────────────────────────────────────");
+
+        var failures = 0;
+        void Check(string name, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}  {detail}");
+            if (!ok) failures++;
+        }
+
+        var store = new ResultStore();
+
+        Check("空集合：没有结果、也没有最近一份",
+            store.Count == 0 && store.Latest is null && store.All.Count == 0,
+            $"{store.Count} 份");
+
+        var resection = new SolveResult
+        {
+            Kind = ResultKind.Resection,
+            TargetId = "IMG-1",
+            Title = "后方交会 · IMG-1",
+        };
+        resection.Add("摄影中心 X", "X_S", "1.000");
+        store.Put(resection);
+
+        var intersection = new SolveResult
+        {
+            Kind = ResultKind.Intersection,
+            TargetId = "IMG-1 / IMG-2",
+            Title = "前方交会 · IMG-1 / IMG-2",
+        };
+        store.Put(intersection);
+
+        Check("两份不同结果并存（第二步没有顶掉第一步）",
+            store.Count == 2 && ReferenceEquals(store.Latest, intersection) &&
+            ReferenceEquals(store.All[0], resection),
+            $"{store.Count} 份：{string.Join("、", store.All.Select(r => r.Title))}");
+
+        Check("放入时补上解算时刻", resection.SolvedAt != default,
+            resection.SolvedAt.ToString("HH:mm:ss"));
+
+        var redo = new SolveResult
+        {
+            Kind = ResultKind.Resection,
+            TargetId = "IMG-1",
+            Title = "后方交会 · IMG-1（重解）",
+        };
+        store.Put(redo);
+
+        Check("同一对象重解只覆盖、不堆重复",
+            store.Count == 2 && ReferenceEquals(store.Get(ResultKind.Resection, "IMG-1"), redo),
+            $"{store.Count} 份，重解后取回的是新那份");
+
+        Check("覆盖不改变它在列表里的位置",
+            ReferenceEquals(store.All[0], redo),
+            $"顺序：{string.Join("、", store.All.Select(r => r.Title))}");
+
+        Check("按模块看：份数、对象列表、最近一份",
+            store.CountOf(ResultKind.Intersection) == 1 &&
+            store.Of(ResultKind.Resection).Count == 1 &&
+            ReferenceEquals(store.LatestOf(ResultKind.Resection), redo),
+            $"前方交会 {store.CountOf(ResultKind.Intersection)} 份、后方交会 " +
+            $"{store.CountOf(ResultKind.Resection)} 份，最近一份 {store.LatestOf(ResultKind.Resection)?.Title}");
+
+        // 同一模块对多张片解算：两份并存，窗口的「对象」下拉就是列这两个
+        var second = new SolveResult
+        {
+            Kind = ResultKind.Resection,
+            TargetId = "IMG-2",
+            Title = "后方交会 · IMG-2",
+        };
+        store.Put(second);
+        Check("同一模块的多张片并存（对象下拉有 2 项）",
+            store.CountOf(ResultKind.Resection) == 2 &&
+            store.Of(ResultKind.Resection).Count == 2 &&
+            ReferenceEquals(store.LatestOf(ResultKind.Resection), second),
+            $"后方交会 {store.CountOf(ResultKind.Resection)} 份：" +
+            $"{string.Join("、", store.Of(ResultKind.Resection).Select(r => r.TargetId))}");
+
+        store.Clear();
+        Check("清空归零（换工程时用）",
+            store.Count == 0 && store.Latest is null && store.All.Count == 0 && store.Of(ResultKind.Resection).Count == 0,
+            $"{store.Count} 份");
+
+        store.Clear();
+        Check("空集合上再清空是幂等的",
+            store.Count == 0 && store.Latest is null, $"{store.Count} 份");
 
         Console.WriteLine(failures == 0 ? "SELFTEST PASS" : $"SELFTEST FAIL ({failures})");
         Environment.ExitCode = failures == 0 ? 0 : 1;

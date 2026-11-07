@@ -265,4 +265,134 @@
         </Setter>
     </Style>
 
+    <!-- ===== 检查器标题栏上的「结果」按钮 =====
+         常驻在标题右侧（不随模块面板换位置），所以带边框、小一号字。
+         解算前禁用、解算后显示份数：用户不必先点开窗口才知道有没有结果。 -->
+    <Style x:Key="ResultButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{StaticResource MutBrush}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Padding" Value="9,2"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
+                            Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource Line2Brush}" BorderThickness="1">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource DimBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Panel2Brush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ===== 点表 / 结果表 =====
+         这套皮原来挂在主窗的 Window.Resources 里，只有主窗看得见。结果窗口单开后
+         要共用同一副皮（否则同一个表格在窗口里长成另一个样子），挪到应用级。 -->
+
+    <Style x:Key="MeasureHeaderStyle" TargetType="DataGridColumnHeader">
+        <Setter Property="Background" Value="{StaticResource Panel3Brush}"/>
+        <Setter Property="Foreground" Value="{StaticResource MutBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+    </Style>
+
+    <Style x:Key="MeasureCellStyle" TargetType="DataGridCell">
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="8,0"/>
+        <Setter Property="FontFamily" Value="Consolas"/>
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DataGridCell">
+                    <Border Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="MeasureGridStyle" TargetType="DataGrid">
+        <Setter Property="AutoGenerateColumns" Value="False"/>
+        <Setter Property="IsReadOnly" Value="True"/>
+        <Setter Property="CanUserAddRows" Value="False"/>
+        <Setter Property="CanUserResizeRows" Value="False"/>
+        <Setter Property="HeadersVisibility" Value="Column"/>
+        <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+        <Setter Property="SelectionMode" Value="Single"/>
+        <Setter Property="SelectionUnit" Value="FullRow"/>
+        <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Panel3Brush}"/>
+        <Setter Property="RowBackground" Value="{StaticResource PanelBrush}"/>
+        <Setter Property="AlternatingRowBackground" Value="{StaticResource Panel2Brush}"/>
+        <Setter Property="RowHeight" Value="22"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="ColumnHeaderStyle" Value="{StaticResource MeasureHeaderStyle}"/>
+        <Setter Property="CellStyle" Value="{StaticResource MeasureCellStyle}"/>
+    </Style>
+
+    <!-- 结果表的两张表：与点表共用一副皮，只多两样本事——
+         ① 行可按数据染成警示色（残差偏大的那行），所以单元格不能自己钉死前景色；
+         ② 残差表的列由代码按模块生成（内定向列框标、后方交会列控制点、相对定向列同名点）。 -->
+    <Style x:Key="ResultCellStyle" TargetType="DataGridCell">
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="8,0"/>
+        <Setter Property="FontFamily" Value="Consolas"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DataGridCell">
+                    <Border Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="ResultRowStyle" TargetType="DataGridRow">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Warn}" Value="True">
+                <Setter Property="Foreground" Value="{StaticResource ErrBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="ResultGridStyle" TargetType="DataGrid"
+           BasedOn="{StaticResource MeasureGridStyle}">
+        <Setter Property="CellStyle" Value="{StaticResource ResultCellStyle}"/>
+        <Setter Property="RowStyle" Value="{StaticResource ResultRowStyle}"/>
+    </Style>
+
 </ResourceDictionary>

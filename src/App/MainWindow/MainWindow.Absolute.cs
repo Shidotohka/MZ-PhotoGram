@@ -10,7 +10,7 @@ namespace Photogrammetry.App;
 /// 绝对定向（M7）：把模型坐标拉到地面坐标。
 ///
 /// <para><b>界面只放三样东西</b>：一句能不能解、一个像对、一个按钮。七参数与不符值全部
-/// 进「结果残差」页——右栏不放结果，这条纪律见 <see cref="MainWindow.Results.cs"/>。</para>
+/// 进结果窗口——右栏不放结果，这条纪律见 <see cref="MainWindow.Results.cs"/>。</para>
 ///
 /// <para><b>参与解算的不是匹配点云</b>：每个已刺点的控制点，用自己的两片像点交会出模型坐标，
 /// 再和它的地面坐标按点号配对。理由见 Docs/路线图.md §3 M7。</para>
@@ -60,7 +60,7 @@ public partial class MainWindow
 
     private void SolveAbsolute_Click(object sender, RoutedEventArgs e) => SolveAbsoluteNow();
 
-    /// <summary>跑一次绝对定向，把七参数与不符值摆到「结果残差」页。</summary>
+    /// <summary>跑一次绝对定向，把七参数与不符值摆到结果窗口。</summary>
     internal AbsoluteOrientationRun SolveAbsoluteNow()
     {
         var pair = AbsolutePair();
@@ -69,7 +69,7 @@ public partial class MainWindow
 
         if (!run.Success)
         {
-            ShowResult(FailTable($"绝对定向 · {label}", run.Message));
+            ShowResult(FailTable(ResultKind.Absolute, label, $"绝对定向 · {label}", run.Message));
             GateBlocked("绝对定向", run.Message);
             UpdateAbsolutePanel();
             return run;
@@ -83,7 +83,7 @@ public partial class MainWindow
             $"rms {r.Rms:0.0000} m　σ₀ {r.Sigma0:0.0000} m　" +
             $"控点 {run.Used.Count}　检查点 {run.Checks.Count}");
 
-        // 提醒的全文进日志，结果页只留结论——和相对定向同一个口径
+        // 提醒的全文进日志，结果窗口只留结论——和相对定向同一个口径
         foreach (var warning in run.Warnings) Log("!", warning);
 
         DiagSummary.Text = run.Warnings.Count > 0

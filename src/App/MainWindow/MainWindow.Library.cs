@@ -182,7 +182,6 @@ public partial class MainWindow
             case "相对定向": UpdateRelativePanel(); break;
             case "模型交会": UpdateModelPanel(); break;
             case "绝对定向": UpdateAbsolutePanel(); break;
-            case "前方交会": UpdateIntersectionPanel(); break;
             default: UpdateResectionPanel(); break;
         }
     }
