@@ -144,10 +144,6 @@ public partial class MainWindow
             Y0 = y0,
             PixelSizeMm = pixelMm,
         };
-        image.Interior = io;
-        image.Affine = null;                        // 参数式没有六系数（手改过框标法再回来，别留着旧系数）
-        image.InteriorTimeUtc = DateTimeOffset.Now;
-        image.Status = ImageStatus.InteriorDone;
 
         OnImageLoaded(null, image);
         RefreshTree();
@@ -155,7 +151,16 @@ public partial class MainWindow
 
         // 参数式也是内定向的一次结论：同样留一份结果，换片/复核/写报告时看得到。
         // 它没有残差与 σ₀（没有多余观测），页脚写明这一点。
-        ShowResult(ParametricInteriorResult(image, io));
+        // 四个数写进影像放到「接受」那一刻（ADR-26）；参数式没有六系数，顺手把旧的清掉
+        var parametric = ParametricInteriorResult(image, io);
+        parametric.OnAccept = () =>
+        {
+            image.Interior = io;
+            image.Affine = null;
+            image.InteriorTimeUtc = DateTimeOffset.Now;
+            image.Status = ImageStatus.InteriorDone;
+        };
+        ShowResult(parametric);
         LogSolve("内定向", image.Id, true,
             $"参数式　f {f:0.###} mm　δ {pixelMm:0.000000} mm/px　x0 {x0:+0.0000;-0.0000}　y0 {y0:+0.0000;-0.0000}");
 
@@ -233,8 +238,9 @@ public partial class MainWindow
             return;
         }
 
-        // 回填内方位元素
-        image.Interior = new InteriorOrientation
+        // 内方位与六系数拿在手里，写进影像放到「接受」那一刻（ADR-26）。
+        // 结果表也从这几个值排，不读工程里还没写进去的状态。
+        var interior = new InteriorOrientation
         {
             FocalLength = _camera.FocalLengthMm,
             X0 = result.X0Mm,
@@ -242,7 +248,7 @@ public partial class MainWindow
             PixelSizeMm = result.PixelSizeMm,
         };
         // 六系数一起入账：反算的 f/x0/y0 推不回旋转与倾斜，重开复核要靠它们
-        image.Affine = new AffineInterior
+        var affine = new AffineInterior
         {
             A0 = result.A0,
             A1 = result.A1,
@@ -251,11 +257,16 @@ public partial class MainWindow
             B1 = result.B1,
             B2 = result.B2,
         };
-        image.InteriorTimeUtc = DateTimeOffset.Now;
-        image.Status = ImageStatus.InteriorDone;
 
-        // 结果与逐点残差进结果窗口，右栏不再摆结果
-        ShowResult(InteriorResult(image, result));
+        var shown = InteriorResult(image, result, interior.FocalLength);
+        shown.OnAccept = () =>
+        {
+            image.Interior = interior;
+            image.Affine = affine;
+            image.InteriorTimeUtc = DateTimeOffset.Now;
+            image.Status = ImageStatus.InteriorDone;
+        };
+        ShowResult(shown);
 
         LogSolve("内定向", image.Id, true,
             $"δ {result.PixelSizeMm:0.000000} mm/px　σ₀ {result.Sigma0Mm:0.000000} mm　" +

@@ -35,6 +35,14 @@
 
             <Button DockPanel.Dock="Right" Content="关闭" Click="Close_Click"
                     Style="{StaticResource ToolBtn}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <!-- 两个判决：接受 = 写进工程（ADR-26）；不采纳 = 丢掉，日志留一行 -->
+            <Button x:Name="AcceptButton" DockPanel.Dock="Right" Content="接受" Click="Accept_Click"
+                    Style="{StaticResource ToolBtn}" VerticalAlignment="Center" Margin="4,0,0,0"
+                    FontWeight="SemiBold"
+                    ToolTip="把这份结果写进工程并立即保存（连带它依赖的、还没入账的前置）"/>
+            <Button x:Name="DiscardButton" DockPanel.Dock="Right" Content="不采纳" Click="Discard_Click"
+                    Style="{StaticResource ToolBtn}" VerticalAlignment="Center" Margin="4,0,0,0"
+                    ToolTip="丢掉这份结果，只在日志里留一行；之后可以重新解算"/>
             <Button DockPanel.Dock="Right" Content="复制" Click="Copy_Click"
                     Style="{StaticResource ToolBtn}" VerticalAlignment="Center" Margin="4,0,0,0"
                     ToolTip="把当前这份结果与残差按制表符分隔复制到剪贴板（可直接粘进 Excel）"/>
@@ -52,8 +60,17 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock x:Name="DetailTitle" Grid.Row="0" FontWeight="SemiBold"
-                       FontSize="13" Margin="0,0,0,8"/>
+            <!-- 标题只写「任务 · 对象」；过程信息归日志（ADR-21）。
+                 右边那枚徽标说明的是"算数不算数"：待定 / 已入账 / 未解出 -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                <Border x:Name="StateBadge" DockPanel.Dock="Right" VerticalAlignment="Center"
+                        Background="{StaticResource Panel2Brush}" BorderBrush="{StaticResource LineBrush}"
+                        BorderThickness="1" CornerRadius="5" Padding="7,1" Margin="8,0,0,0"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="StateBadgeText" FontSize="11.5"/>
+                </Border>
+                <TextBlock x:Name="DetailTitle" FontWeight="SemiBold" FontSize="13"/>
+            </DockPanel>
 
             <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>

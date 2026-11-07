@@ -1277,6 +1277,13 @@ internal static class Program
 
         CheckProcessInfo(win, "内定向");
 
+        // 接受之后六系数才进影像（ADR-26）
+        var accepted = win.AcceptForTooling(ResultKind.Interior);
+        Console.WriteLine(accepted
+            ? "[PASS] 接受内定向 → 内方位与六系数已入账"
+            : "[FAIL] 接受内定向失败");
+        if (!accepted) Environment.ExitCode = 1;
+
         // ---- 入账（v4）：框标法的六系数要进工程，而且存盘读回不许变 ----
         var affine = (view.Image as ImageItem)?.Affine;
         Console.WriteLine(affine is not null
@@ -1593,6 +1600,11 @@ internal static class Program
             Environment.ExitCode = 1;
             return;
         }
+
+        // 解算不写工程（ADR-26）：这一步就是操作员按「接受」，后面几步才有前置
+        Console.WriteLine(win.AcceptForTooling(ResultKind.Relative)
+            ? "[PASS] 接受相对定向 → 像对元素与逐点 q 已入账"
+            : "[FAIL] 接受相对定向失败");
 
         var r = run.Result!;
         Console.WriteLine($"  {r.Iterations} 轮　基线 ({r.Bx:+0.000000;-0.000000}, {r.By:+0.000000;-0.000000}, " +
@@ -2101,6 +2113,11 @@ internal static class Program
             return;
         }
 
+        // 同样：入账要按「接受」
+        Console.WriteLine(win.AcceptForTooling(ResultKind.Model)
+            ? "[PASS] 接受模型交会 → 模型点已入账"
+            : "[FAIL] 接受模型交会失败");
+
         var worst = outcome.Observations.Min(o => o.ConvergenceAngleDeg);
         Console.WriteLine($"  {outcome.Observations.Count} 个模型点，最差交会角 {worst:0.00}°");
         Console.WriteLine(worst >= 15.0
@@ -2173,6 +2190,11 @@ internal static class Program
                 ? $"[PASS] 接着做绝对定向：λ {run.Result!.Scale:0.000}（基线 {baseM:0} m）"
                 : $"[FAIL] 绝对定向没解出来：{run.Message}");
             if (!run.Success) Environment.ExitCode = 1;
+            else if (!win.AcceptForTooling(ResultKind.Absolute))
+            {
+                Console.WriteLine("[FAIL] 接受绝对定向失败");
+                Environment.ExitCode = 1;
+            }
         }
 
         // 这次改动要的正是这一条：相对定向算完再算模型交会，前一份还在。
@@ -3119,6 +3141,14 @@ internal static class Program
 
         // 这正是 UltraCam Xp 手册上那组数：f 100.500 mm、δ 6.000 µm、主点 (0.000, 0.120) mm
         win.ApplyParametricForTooling("100.500", "0.000", "0.120", "6.000");
+
+        // 解算不写工程（ADR-26）：这一步等于操作员按「接受」
+        if (!win.AcceptForTooling(ResultKind.Interior))
+        {
+            Console.WriteLine("[FAIL] 接受参数式内定向失败");
+            Environment.ExitCode = 1;
+            return;
+        }
 
         var io = image.Interior;
         Check("填 6.000 µm 落库为 0.006 mm/px",

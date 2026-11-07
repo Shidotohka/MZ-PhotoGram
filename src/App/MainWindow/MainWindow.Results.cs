@@ -91,9 +91,77 @@ public partial class MainWindow
             return;
         }
 
-        _resultWindow = new ResultWindow(_results, target) { Owner = this };
+        _resultWindow = new ResultWindow(_results, target, AcceptResult, DiscardResult) { Owner = this };
         _resultWindow.Closed += (_, _) => _resultWindow = null;
         _resultWindow.Show();
+    }
+
+    /// <summary>
+    /// 接受一份结果（ADR-26）：写进工程 → 记日志 → 立即保存 → 刷新受影响的界面。
+    ///
+    /// <para>写工程那一步由解算方挂在 <see cref="SolveResult.OnAccept"/> 上——只有它手里
+    /// 有一手的结果对象（七参数、逐点不符值）。这里是"什么时候写"的判断，那里是"写什么"。</para>
+    ///
+    /// <para>失败的结果、没有可入账内容的结果一律不接受：结果窗口里按钮本来就是禁用的，
+    /// 这里再挡一次，免得被别的入口绕过去。</para>
+    /// </summary>
+    internal bool AcceptResult(SolveResult result)
+    {
+        if (result.State == ResultState.Accepted) return false;
+        if (result.Failed || result.OnAccept is null) return false;
+
+        result.OnAccept();
+        _results.Accept(result);
+
+        LogSolve(result.KindLabel, result.TargetId, true, "已入账");
+        SaveAfterAccept();
+        RefreshAfterDecision();
+        return true;
+    }
+
+    /// <summary>不采纳：从集合里删掉，日志留一行。它没进过工程，所以没有要回滚的东西。</summary>
+    internal bool DiscardResult(SolveResult result)
+    {
+        if (!_results.Discard(result)) return false;
+
+        Log("!", $"{result.KindLabel} · {result.TargetId} 未采纳（结果已丢弃，需要就重解一次）");
+        UpdateResultButton();
+        return true;
+    }
+
+    /// <summary>
+    /// 接受即存盘：成果的价值就是"关掉程序还在"。没有保存路径时不弹另存为——
+    /// 那个对话框会把"边解边看"的循环打断；留一句日志，用户按 Ctrl+S 时自然选路径。
+    /// </summary>
+    private void SaveAfterAccept()
+    {
+        if (_projectPath is null)
+        {
+            Log("!", "结果已入账；工程还没有保存路径，按 Ctrl+S 才会写进文件");
+            return;
+        }
+
+        try
+        {
+            ProjectFile.Save(_project, _projectPath);
+            Log("OK", $"工程已保存　{System.IO.Path.GetFileName(_projectPath)}");
+        }
+        catch (Exception ex)
+        {
+            Log("✗", "结果已入账，但保存失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>入账/丢弃之后，界面上"取决于工程状态"的东西都要重读一遍。</summary>
+    private void RefreshAfterDecision()
+    {
+        RefreshPointTable();
+        RefreshTree();
+        UpdateStatusCounts();
+        UpdateResultButton();
+        UpdateFiducialUi();      // 内方位刚出现/消失时，框标清单与「输入检查」都跟着变
+        UpdateModulePanels();
+        if (_resultWindow is { IsVisible: true } window) window.ShowKind(window.Scope, _results.LatestOf(window.Scope));
     }
 
     private void ResultButton_Click(object sender, RoutedEventArgs e) => OpenResultWindow();
@@ -198,7 +266,8 @@ public partial class MainWindow
 
     // ---------- 内定向 ----------
 
-    private static SolveResult InteriorResult(ImageItem image, FiducialOrientationResult r)
+    private static SolveResult InteriorResult(ImageItem image, FiducialOrientationResult r,
+        double focalLengthMm)
     {
         var table = new SolveResult
         {
@@ -220,7 +289,7 @@ public partial class MainWindow
             r.Sigma0Mm > 0.02 ? "偏大" : "", r.Sigma0Mm > 0.02);
         table.Num("最大残差", "max|v|", r.MaxAbsResidualMm, "0.000000", "mm");
         table.Add("多余观测", "r", r.Redundancy.ToString(CultureInfo.InvariantCulture), "", "2n − 6");
-        table.Num("焦距", "f", image.Interior?.FocalLength ?? double.NaN, "0.00", "mm",
+        table.Num("焦距", "f", focalLengthMm, "0.00", "mm",
             "相机检定值，不由内定向求");
 
         table.Head("框标", "vx (mm)", "vy (mm)", "说明");

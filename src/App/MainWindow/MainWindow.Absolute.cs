@@ -77,9 +77,6 @@ public partial class MainWindow
 
         var r = run.Result!;
 
-        // 入账：七参数 + 质量 + 逐点不符值。第 3 步挪进「接受」；现在先保持旧行为
-        AbsoluteOrientationTask.Commit(pair!, run);
-
         LogSolve("绝对定向", label, true,
             $"λ {r.Scale:0.000000}　φ {r.PhiDeg:+0.0000;-0.0000}°　" +
             $"ω {r.OmegaDeg:+0.0000;-0.0000}°　κ {r.KappaDeg:+0.0000;-0.0000}°　" +
@@ -94,7 +91,9 @@ public partial class MainWindow
             : $"✓ 绝对定向完成　rms {r.Rms:0.000} m";
         DiagSummary.Foreground = run.Warnings.Count > 0 ? WarnBadge : OkBadge;
 
-        ShowResult(AbsoluteResultTable(run));
+        var absoluteTable = AbsoluteResultTable(run);
+        absoluteTable.OnAccept = () => AbsoluteOrientationTask.Commit(pair!, run);
+        ShowResult(absoluteTable);
         UpdateAbsolutePanel();
         RefreshTree();
         return run;

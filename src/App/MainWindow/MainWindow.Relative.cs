@@ -415,8 +415,8 @@ public partial class MainWindow
         var table = RelativeResultTable(run);
         var r = run.Result!;
 
-        // 入账：像对的五个元素 + 每个同名点的 q。第 3 步挪进「接受」；现在先保持旧行为
-        RelativeOrientationTask.Commit(_project, run);
+        // 入账放到「接受」那一刻（ADR-26）：这里只把"写什么"挂上去，不写
+        table.OnAccept = () => RelativeOrientationTask.Commit(_project, run);
 
         LogSolve("相对定向", $"{left?.Id} → {right?.Id}", true,
             $"{r.Iterations} 轮　{r.UsedCount}/{run.Pairs.Count} 对　σ₀ {r.Sigma0Mm:0.0000} mm　" +

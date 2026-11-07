@@ -27,6 +27,8 @@ namespace Photogrammetry.App;
 public partial class ResultWindow : Window
 {
     private readonly ResultStore _store;
+    private readonly Func<SolveResult, bool>? _accept;
+    private readonly Func<SolveResult, bool>? _discard;
     private bool _loading;
 
     /// <summary>解算后是否自动打开窗口。会话内有效：关掉工程不该把用户的偏好一起清掉。</summary>
@@ -38,11 +40,16 @@ public partial class ResultWindow : Window
     /// <summary>这个窗口现在管哪一步的结果。Snap 用它验「解完跟到那一步」。</summary>
     public ResultKind Scope { get; private set; }
 
-    public ResultWindow(ResultStore store, ResultKind scope)
+    /// <param name="accept">接受：由主窗负责写工程、记日志、刷新界面。返回值表示做成了没有。</param>
+    /// <param name="discard">不采纳：由主窗负责从集合里删掉并记一行日志。</param>
+    public ResultWindow(ResultStore store, ResultKind scope,
+        Func<SolveResult, bool>? accept = null, Func<SolveResult, bool>? discard = null)
     {
         InitializeComponent();
 
         _store = store;
+        _accept = accept;
+        _discard = discard;
         AutoOpenCheck.IsChecked = AutoOpen;
 
         ShowKind(scope, store.LatestOf(scope));
@@ -116,6 +123,28 @@ public partial class ResultWindow : Window
         NoteText.Visibility = string.IsNullOrEmpty(result.Note)
             ? Visibility.Collapsed
             : Visibility.Visible;
+
+        UpdateActions(result);
+    }
+
+    /// <summary>
+    /// 两个判决按钮与徽标的状态。规矩（ADR-26）：
+    /// 失败的结果不能接受（没解出来就没有可存的数）；已入账的两颗都禁用（要改就重解）；
+    /// 没有可入账内容的结果（`OnAccept` 为 null，比如前方交会）也不能接受。
+    /// </summary>
+    private void UpdateActions(SolveResult result)
+    {
+        var accepted = result.State == ResultState.Accepted;
+
+        AcceptButton.IsEnabled = !accepted && !result.Failed && result.OnAccept is not null;
+        DiscardButton.IsEnabled = !accepted;
+
+        StateBadge.Visibility = Visibility.Visible;
+        StateBadgeText.Text = result.Failed
+            ? "未解出"
+            : accepted ? "已入账" : "待定 · 未入账";
+        StateBadgeText.Foreground = (Brush)FindResource(
+            result.Failed ? "ErrBrush" : accepted ? "OkBrush" : "WarnBrush");
     }
 
     private void ShowEmpty()
@@ -130,6 +159,10 @@ public partial class ResultWindow : Window
 
         NoteText.Text = string.Empty;
         NoteText.Visibility = Visibility.Collapsed;
+
+        StateBadge.Visibility = Visibility.Collapsed;
+        AcceptButton.IsEnabled = false;
+        DiscardButton.IsEnabled = false;
 
         EmptyText.Text = $"{ResultKinds.Label(Scope)}还没有结果\n\n" +
                          "解算之后结果会留在这里，换到别的步骤也不会被顶掉。";
@@ -169,6 +202,25 @@ public partial class ResultWindow : Window
         AutoOpen = AutoOpenCheck.IsChecked == true;
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>
+    /// 接受：交给主窗写工程 + 记日志，然后原地刷新（徽标变「已入账」，两颗按钮禁用）。
+    /// 关窗不算判决——待定的结果留着，下次打开这个窗口还能接受（ADR-26 ⑤）。
+    /// </summary>
+    private void Accept_Click(object sender, RoutedEventArgs e)
+    {
+        if (ObjectBox.SelectedItem is not SolveResult result) return;
+        if (_accept?.Invoke(result) != true) return;
+        ShowKind(Scope, result);
+    }
+
+    /// <summary>不采纳：丢掉这份，选中落到同一对象的其余份（通常就没有了）。</summary>
+    private void Discard_Click(object sender, RoutedEventArgs e)
+    {
+        if (ObjectBox.SelectedItem is not SolveResult result) return;
+        if (_discard?.Invoke(result) != true) return;
+        ShowKind(Scope, null);
+    }
 
     /// <summary>
     /// 复制当前这份结果：制表符分隔，表头齐全，粘进 Excel 或报告里能直接对齐。

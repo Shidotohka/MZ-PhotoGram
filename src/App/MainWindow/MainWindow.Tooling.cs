@@ -36,6 +36,28 @@ public partial class MainWindow
     internal bool ModelSolveEnabled => ModelSolveButton?.IsEnabled == true;
 
     /// <summary>
+    /// 工具：接受某一步最近的一份结果（等价于点结果窗口里的「接受」）。
+    ///
+    /// <para>自检走界面时必须有这一步：现在解算不写工程（ADR-26），不点接受，
+    /// 下一步的闸门就会说"缺前置"——那不是 bug，正是这条流程的意义。</para>
+    /// </summary>
+    internal bool AcceptForTooling(ResultKind kind)
+    {
+        var latest = _results.LatestOf(kind);
+        return latest is not null && AcceptResult(latest);
+    }
+
+    /// <summary>工具：不采纳某一步最近的一份结果（验"丢掉之后工程里没有它"）。</summary>
+    internal bool DiscardForTooling(ResultKind kind)
+    {
+        var latest = _results.LatestOf(kind);
+        return latest is not null && DiscardResult(latest);
+    }
+
+    /// <summary>某一步当前的结果份数（工具用）。</summary>
+    internal int ResultCountForTooling(ResultKind kind) => _results.CountOf(kind);
+
+    /// <summary>
     /// 同时发起两次载入（模拟"两张片几乎同时拖进来"），用来验载入串行闸：
     /// 两张必须落进两个不同的视窗，且右栏状态是两者都在。
     /// </summary>

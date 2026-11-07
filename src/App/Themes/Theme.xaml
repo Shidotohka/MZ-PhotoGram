@@ -15,6 +15,7 @@
     <SolidColorBrush x:Key="AccentSoftBrush" Color="#E7F1F8"/>
     <SolidColorBrush x:Key="OkBrush" Color="#1E8E5A"/>
     <SolidColorBrush x:Key="ErrBrush" Color="#C0392B"/>
+<SolidColorBrush x:Key="WarnBrush" Color="#A86A12"/>
     <SolidColorBrush x:Key="WorkspaceBgBrush" Color="#E9EEF3"/>
     <SolidColorBrush x:Key="ViewportHeaderBrush" Color="#F6F9FB"/>
     <SolidColorBrush x:Key="CrosshairBrush" Color="#B7C3CD"/>

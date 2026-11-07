@@ -130,6 +130,15 @@ public sealed class SolveResult
     /// <summary>入账时刻。没入账为 null。</summary>
     public DateTime? AcceptedAt { get; set; }
 
+    /// <summary>
+    /// 入账动作：把这份结果的<b>数值</b>写进工程（`images[].interior`、`pairs[].absolute` …）。
+    ///
+    /// <para>由解算方在这一份结果生成时挂上来（那时它手里才有一手的结果对象）；
+    /// 结果窗口的「接受」只负责调用它。为 null 表示"这份结果没有可入账的东西"——
+    /// 例如失败的结果、或者前方交会那种只算临时点的步骤。</para>
+    /// </summary>
+    public Action? OnAccept { get; set; }
+
     /// <summary>模块名（显示用）。</summary>
     public string KindLabel => ResultKinds.Label(Kind);
 
