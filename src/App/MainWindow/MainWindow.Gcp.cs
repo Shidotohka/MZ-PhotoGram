@@ -512,18 +512,39 @@ public partial class MainWindow
 
     private void GcpSetCheck_Click(object sender, RoutedEventArgs e) => SetSelectedGcpType(GcpType.CheckPoint);
 
+    /// <summary>
+    /// 把选中的控制点改成控制点 / 检查点。
+    ///
+    /// <para><b>为什么要看两张表</b>：模型交会模块里显示的是 <c>ModelGrid</c>（行类型是
+    /// <c>ModelRow</c>），控制点表 <c>GcpGrid</c> 是隐藏的。只读 <c>GcpGrid.SelectedItem</c>
+    /// 的话，在模型交会页右键「设为检查点」会静默返回——菜单点了没反应，还查不出为什么。</para>
+    /// </summary>
     private void SetSelectedGcpType(GcpType type)
     {
-        if (GcpGrid.SelectedItem is not GcpRow { Source: { } gcp }) return;
+        var gcp = SelectedGcpFromAnyTable();
+        if (gcp is null) return;
 
         gcp.Type = type;
         RefreshPointTable();
-        UpdateResectionPanel();
+        if (_moduleName == "绝对定向") UpdateAbsolutePanel();
+        else UpdateResectionPanel();
 
         DiagSummary.Text = type == GcpType.CheckPoint
-            ? $"{gcp.Id} 已设为检查点，不参与后方交会"
-            : $"{gcp.Id} 已设为控制点";
+            ? $"{gcp.Id} 已设为检查点，不参与解算（只用来独立检核）"
+            : $"{gcp.Id} 已设为控制点，参与解算";
         DiagSummary.Foreground = DimBadge;
+    }
+
+    /// <summary>当前可见的那张点表里选中的控制点。模型交会表与控制点表都算。</summary>
+    private Gcp? SelectedGcpFromAnyTable()
+    {
+        if (ModelGrid.Visibility == Visibility.Visible &&
+            ModelGrid.SelectedItem is ModelRow { Source: { } fromModel })
+        {
+            return fromModel;
+        }
+
+        return GcpGrid.SelectedItem is GcpRow { Source: { } fromGcp } ? fromGcp : null;
     }
 
 }

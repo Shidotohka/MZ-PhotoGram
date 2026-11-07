@@ -1931,6 +1931,29 @@ internal static class Program
             : $"[FAIL] 结果页不对：title=[{panel.Title}] 元素=[{string.Join("/", names)}] 行数={panel.Rows.Count}");
         if (!shown) Environment.ExitCode = 1;
 
+        // 模型交会表上的右键「设为检查点」——这条路上曾经读错了表（只看控制点表），
+        // 于是在这张表上右键是死的。下面走的正是菜单那两个处理器。
+        var k01 = win.CurrentProject.Gcps.FirstOrDefault(g => g.Id == "K01");
+        var rowFound = win.SetGcpTypeFromModelTableForTooling("K01", checkPoint: true);
+        Console.WriteLine(rowFound && k01 is { Type: GcpType.CheckPoint }
+            ? "[PASS] 模型交会表右键能把控制点改成检查点"
+            : $"[FAIL] 改类型没生效（找到行={rowFound}，类型={k01?.Type}）");
+        if (!rowFound || k01 is not { Type: GcpType.CheckPoint }) Environment.ExitCode = 1;
+
+        // 检查点必须真的退出解算，否则"独立检核"就是空话
+        var asCheck = AbsoluteOrientationTask.Prepare(win.CurrentProject, pair);
+        var checkCount = asCheck.Observations.Count(o => o.Type == GcpType.CheckPoint);
+        Console.WriteLine(checkCount == 3
+            ? "[PASS] 改成检查点后，绝对定向的输入里它就退出了解算（3 个检查点）"
+            : $"[FAIL] 检查点只有 {checkCount} 个（应为 3）");
+        if (checkCount != 3) Environment.ExitCode = 1;
+
+        var stillThere = win.SetGcpTypeFromModelTableForTooling("K01", checkPoint: false);
+        Console.WriteLine(stillThere && k01 is { Type: GcpType.Planimetric }
+            ? "[PASS] 同一行再改回控制点也生效"
+            : $"[FAIL] 改回控制点没生效（类型={k01?.Type}）");
+        if (!stillThere || k01 is not { Type: GcpType.Planimetric }) Environment.ExitCode = 1;
+
         // 同一条链接着走绝对定向：模型交会的产物就是它的输入
         if (win.SelectModuleForTooling("绝对定向"))
         {
