@@ -81,7 +81,7 @@ internal static class Program
         // 把「平面 / 高程」拆开报出来——界面上只有三维合量，看不出问题在哪一头。
         if (Get(args, "--analyze") is { } analyzePath)
         {
-            AnalyzeProject(analyzePath);
+            AnalyzeProject(analyzePath, args.Any(a => string.Equals(a, "--loo", StringComparison.OrdinalIgnoreCase)));
             return;
         }
 
@@ -1654,7 +1654,7 @@ internal static class Program
     /// <para>为什么要有它：界面上的结果页只给三维合量的 rms，而交会角小的时候高程误差被
     /// $H/B$ 放大，平面与高程能差一个量级——数字拆开才看得出瓶颈在哪。</para>
     /// </summary>
-    private static void AnalyzeProject(string path)
+    private static void AnalyzeProject(string path, bool leaveOneOut = false)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
@@ -1732,7 +1732,7 @@ internal static class Program
         Console.WriteLine($"\n  绝对定向　λ {r.Scale:0.000000} m（模型单位 → 米）");
         Console.WriteLine($"  　　　　　φ {r.PhiDeg:+0.0000;-0.0000}° ω {r.OmegaDeg:+0.0000;-0.0000}° κ {r.KappaDeg:+0.0000;-0.0000}°" +
                           $"　平移 ({r.X0:0.000}, {r.Y0:0.000}, {r.Z0:0.000}) m");
-        Console.WriteLine($"  　　　　　不平值 rms {r.Rms:0.0000} m　平面 Δxy {run.RmsXy:0.0000} m　高程 Δz {run.RmsZ:0.0000} m" +
+        Console.WriteLine($"  　　　　　不符值 rms {r.Rms:0.0000} m　平面 Δxy {run.RmsXy:0.0000} m　高程 Δz {run.RmsZ:0.0000} m" +
                           $"　σ₀ {r.Sigma0:0.0000} m");
         Console.WriteLine($"  　　　　　深度放大 H/B {run.DepthAmplification:0.000}　地面采样 {run.GroundSampleDistance:0.0000} m/px" +
                           $"　σ₀ 折 {r.Sigma0 / run.GroundSampleDistance:0.00} px");
@@ -1762,13 +1762,52 @@ internal static class Program
 
         foreach (var w in run.Warnings) Console.WriteLine($"  ! {w}");
 
+        // ---- 留一法：轮流把每个点当检查点 ----
+        // 一个点被拿掉后解会变多少、它自己误差多大，这两件事一起看才能分清
+        // 「某个点刺歪了」和「整片几何本来就弱」。
+        if (leaveOneOut && model.Observations.Count >= 4)
+        {
+            var originals = project.Gcps.ToDictionary(g => g.Id, g => g.Type);
+            Console.WriteLine();
+            Console.WriteLine("  留一法：轮流留一个点不参与解算，看它自己的偏差");
+            Console.WriteLine($"  {"留给它",-10}{"Δxy (m)",12}{"Δz (m)",12}{"λ 变化 (m)",14}{"φ/ω 变化 (°)",16}");
+
+            foreach (var observation in model.Observations)
+            {
+                foreach (var g in project.Gcps) g.Type = GcpType.Planimetric;
+                project.Gcps.First(g => g.Id == observation.GcpId).Type = GcpType.CheckPoint;
+
+                var loo = AbsoluteOrientationTask.Run(project, pair);
+                if (!loo.Success || loo.Result is not { } lr)
+                {
+                    Console.WriteLine($"  {observation.GcpId,-10}{"—",12}{"—",12}同一批点解不出来");
+                    continue;
+                }
+
+                var check = loo.Checks.FirstOrDefault();
+                var t = check?.Transformed ?? lr.Transform(observation.Model);
+                var gk = GroundAxes.ToMathFrame(observation.Ground, loo.GroundOrder);
+                var dxy = Math.Sqrt((t.X - gk.X) * (t.X - gk.X) + (t.Y - gk.Y) * (t.Y - gk.Y));
+                var dz = t.Z - gk.Z;
+                var dPhi = lr.PhiDeg - r.PhiDeg;
+                var dOmega = lr.OmegaDeg - r.OmegaDeg;
+                var scaleText = $"{lr.Scale - r.Scale:+0.0000;-0.0000;0.0000}";
+                var angleText = $"{dPhi:+0.000;-0.000;0.000} / {dOmega:+0.000;-0.000;0.000}";
+
+                Console.WriteLine($"  {observation.GcpId,-10}{dxy,12:0.0000}{dz,12:+0.0000;-0.0000}" +
+                                  $"{scaleText,14}{angleText,20}");
+            }
+
+            foreach (var g in project.Gcps) g.Type = originals[g.Id];
+        }
+
         // 一句结论：把瓶颈指名道姓地说出来
         var gsd = run.GroundSampleDistance;
         if (!double.IsNaN(gsd) && gsd > 0)
         {
             Console.WriteLine();
             Console.WriteLine($"  结论：平面 {run.RmsXy / gsd:0.00} px、高程 {run.RmsZ / gsd:0.00} px" +
-                              $"（$\\sigma_0$ {r.Sigma0 / gsd:0.00} px，判据 ≤ 10 px）；" +
+                              $"（σ₀ {r.Sigma0 / gsd:0.00} px，判据 ≤ 10 px）；" +
                               $"深度被 H/B = {run.DepthAmplification:0.0} 放大。");
         }
     }
