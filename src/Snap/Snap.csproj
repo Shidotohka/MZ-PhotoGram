@@ -8,4 +8,11 @@
   <ItemGroup>
     <ProjectReference Include="..\App\App.csproj" />
   </ItemGroup>
+
+  <!-- 报告模板跟着 App 走：Snap 在进程内跑主窗，AppContext.BaseDirectory 是 Snap 的输出目录，
+       所以这里也要有一份，否则报告自检会报"模板不在"。 -->
+  <ItemGroup>
+    <None Include="..\App\Report\ReportTemplate.html" Link="Report\ReportTemplate.html"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

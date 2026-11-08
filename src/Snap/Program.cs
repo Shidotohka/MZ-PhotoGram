@@ -86,6 +86,14 @@ internal static class Program
             return;
         }
 
+        // 成果报告：模板、五节表格、数字写法、标红、顺序——全在纯数据上验，
+        // 不开窗口也不解算。报告本来就是"把已入账的成果换个版式"。
+        if (args.Any(a => string.Equals(a, "--report", StringComparison.OrdinalIgnoreCase)))
+        {
+            ReportCheck(Get(args, "--out"));
+            return;
+        }
+
         if (args.Any(a => string.Equals(a, "--control", StringComparison.OrdinalIgnoreCase)))
         {
             ControlCheck(Get(args, "--gcp"),
@@ -4091,5 +4099,199 @@ internal static class Program
                 .Concat(s.Rows.Select(r => string.Join("\t", r.Cells) + $"\t{r.Warn}"))
                 .Concat(new[] { s.Note })))
         .ToList();
+
+    /// <summary>
+    /// 成果报告（后交–前交）：模板在不在、五节排出来没有、顺序对不对、数是不是那几个、
+    /// 该标红的地方红了没有。**纯数据**——不开窗口、不解算：报告本来就是"把已入账的成果
+    /// 换个版式"，它不该有自己的计算。
+    ///
+    /// <para>不验的部分：保存对话框与浏览器（那是三个系统调用，不是逻辑）。</para>
+    /// </summary>
+    private static void ReportCheck(string? outPath)
+    {
+        Console.WriteLine("成果报告───────────────────────────────────────────────");
+
+        var templatePath = MainWindow.ReportTemplatePathForTooling;
+        if (!File.Exists(templatePath))
+        {
+            Console.WriteLine($"[FAIL] 报告模板不在：{templatePath}（csproj 的 CopyToOutputDirectory 没生效？）");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine($"[PASS] 模板在：{Path.GetFileName(templatePath)}（{new FileInfo(templatePath).Length} 字节）");
+
+        var project = ReportFixture();
+        var points = new List<Photogrammetry.App.Report.ReportPoint>
+        {
+            new("DSC001 / DSC002", new IntersectionResult
+            {
+                Success = true,
+                Point = new GroundPointM(1000.123, 2000.456, 88.789),
+                ConvergenceAngleDeg = 32.5,
+                MX = 0.021, MY = 0.022, MZ = 0.043,
+            }),
+            // 交会角只有 8°：深度不可靠，该标红
+            new("DSC001 / DSC002", new IntersectionResult
+            {
+                Success = true,
+                Point = new GroundPointM(1001.5, 2001.5, 90.0),
+                ConvergenceAngleDeg = 8.0,
+                MX = 0.03, MY = 0.03, MZ = 0.75,
+            }),
+        };
+
+        var html = Photogrammetry.App.Report.ReportBuilder.Build(
+            project, points, new DateTime(2026, 11, 8, 15, 30, 0), null);
+
+        // ---- 结构 ----
+        var sections = html.Split("<section>").Length - 1;
+        Console.WriteLine(sections == 5
+            ? "[PASS] 五节：内定向 / 框标残差 / 后方交会 / 控制点残差 / 前方交会"
+            : $"[FAIL] 节数 {sections}（应为 5）");
+        if (sections != 5) Environment.ExitCode = 1;
+
+        // 顺序就是作业顺序：上游在前，下游在后
+        var order = new[] { "内定向", "框标残差", "后方交会", "控制点残差", "前方交会" }
+            .Select(title => html.IndexOf("</span>" + title, StringComparison.Ordinal))
+            .ToList();
+        var ordered = order.All(i => i >= 0) && order.Zip(order.Skip(1)).All(pair => pair.First < pair.Second);
+        Console.WriteLine(ordered
+            ? "[PASS] 节的顺序就是作业顺序（内定向 → 框标残差 → 后方交会 → 控制点残差 → 前方交会）"
+            : $"[FAIL] 节的顺序不对：[{string.Join(",", order)}]");
+        if (!ordered) Environment.ExitCode = 1;
+
+        // ---- 内容 ----
+        var expected = new (string Needle, string What)[]
+        {
+            ("DSC001", "影像号"),
+            ("153.24", "焦距"),
+            ("+0.0120", "主点 x₀（带符号）"),
+            ("0.0085", "内定向 σ₀"),
+            ("1234.567", "摄影中心 X"),
+            ("+0.4000", "姿态角 φ"),
+            ("1000.123", "交会点 X"),
+            ("32.50", "交会角"),
+        };
+
+        foreach (var (needle, what) in expected)
+        {
+            var hit = html.Contains(needle, StringComparison.Ordinal);
+            Console.WriteLine(hit ? $"[PASS] 报告里有{what} {needle}" : $"[FAIL] 报告里找不到{what}「{needle}」");
+            if (!hit) Environment.ExitCode = 1;
+        }
+
+        // ---- 标红 ----
+        // 三处故意做坏：DSC002 的 σ₀ 0.031（> 0.02）、K03 的残差 6σ₀、8° 的交会角
+        var marks = html.Split("class=\"n w\"").Length - 1;
+        Console.WriteLine(marks >= 3
+            ? $"[PASS] 超出判据的 {marks} 处标红（σ₀ 偏大、残差 > 3σ₀、交会角 < 15°）"
+            : $"[FAIL] 只标红了 {marks} 处（至少该有 3 处）");
+        if (marks < 3) Environment.ExitCode = 1;
+
+        // ---- 没有漏填的占位符 ----
+        var unreplaced = html.Contains("{{", StringComparison.Ordinal);
+        Console.WriteLine(unreplaced ? "[FAIL] 还有没填的 {{占位符}}" : "[PASS] 占位符全填上了");
+        if (unreplaced) Environment.ExitCode = 1;
+
+        // ---- 没有交会点时那一段写「未计算」，不是整节消失 ----
+        var empty = Photogrammetry.App.Report.ReportBuilder.Build(
+            project, Array.Empty<Photogrammetry.App.Report.ReportPoint>(),
+            new DateTime(2026, 11, 8, 15, 30, 0), null);
+        var showsEmpty = empty.Contains("未计算", StringComparison.Ordinal) &&
+                         empty.Split("<section>").Length - 1 == 5;
+        Console.WriteLine(showsEmpty
+            ? "[PASS] 没做前方交会时，那一段写「未计算」而不删节（读者知道是没做，不是漏印）"
+            : "[FAIL] 没有交会点时报告不对");
+        if (!showsEmpty) Environment.ExitCode = 1;
+
+        // ---- 存一份出来给人看 ----
+        var path = outPath ?? Path.Combine(Path.GetTempPath(), "pgm-report.html");
+        File.WriteAllText(path, html, new System.Text.UTF8Encoding(false));
+        Console.WriteLine($"[PASS] 已写出 {Path.GetFullPath(path)}（{html.Length} 字符）");
+    }
+
+    /// <summary>
+    /// 报告自检用的工程：两片（一片 σ₀ 正常、一片偏大）、两片都做过后方交会、
+    /// 四个控制点（其中一个是检查点），外加一处故意做坏的残差。
+    /// </summary>
+    private static Project ReportFixture()
+    {
+        var project = new Project { Name = "报告自检" };
+
+        var good = new ImageItem { Id = "DSC001", Width = 5616, Height = 3744 };
+        var bad = new ImageItem { Id = "DSC002", Width = 5616, Height = 3744 };
+
+        foreach (var (image, sigma0) in new[] { (good, 0.0085), (bad, 0.031) })
+        {
+            image.Interior = new InteriorOrientation
+            {
+                FocalLength = 153.24,
+                X0 = 0.012,
+                Y0 = -0.009,
+                PixelSizeMm = 0.00641,
+            };
+            image.Affine = new AffineInterior
+            {
+                A0 = 0.012, A1 = 0.00641, A2 = 0.0,
+                B0 = -0.009, B1 = 0.0, B2 = -0.00641,
+            };
+
+            var quality = new InteriorQuality
+            {
+                SxMm = 0.00641, SyMm = 0.00641, PixelSizeMm = 0.00641,
+                X0Mm = 0.012, Y0Mm = -0.009,
+                Sigma0Mm = sigma0,
+                MaxAbsResidualMm = sigma0 * 1.4,
+                Redundancy = 2,
+            };
+            quality.Residuals.Add(new FiducialResidualValue(1, sigma0 * 0.4, -sigma0 * 0.3));
+            quality.Residuals.Add(new FiducialResidualValue(2, -sigma0 * 0.2, sigma0 * 0.5));
+            quality.Residuals.Add(new FiducialResidualValue(3, sigma0 * 0.1, -sigma0 * 0.1));
+            // 坏片第 4 个框标故意点歪：残差 0.30 mm，远超 5σ₀
+            quality.Residuals.Add(new FiducialResidualValue(4,
+                sigma0 > 0.02 ? 0.30 : sigma0 * 0.2, 0.0));
+            image.InteriorQuality = quality;
+            image.InteriorTimeUtc = DateTimeOffset.UtcNow;
+
+            image.Exterior = new ExteriorOrientation
+            {
+                Xs = 1234.567, Ys = 2345.678, Zs = 890.123,
+                Phi = 0.4, Omega = -0.3, Kappa = 7.0,
+            };
+
+            var resection = new ResectionQuality
+            {
+                Sigma0Mm = 0.0095,
+                ParamSd = new[] { 0.0101, 0.0102, 0.0213, 0.0001, 0.0001, 0.0001 },
+                Condition = 12.3,
+                Iterations = 3,
+                UsedCount = 3,
+                Redundancy = 0,
+                MaxAbsResidualMm = 0.021,
+            };
+            resection.Residuals.Add(new ResectionResidualValue("K01", 0.0012, -0.0009));
+            resection.Residuals.Add(new ResectionResidualValue("K02", -0.0007, 0.0011));
+            // 第三个点残差 0.057 mm ≈ 6σ₀：该标红
+            resection.Residuals.Add(new ResectionResidualValue("K03", 0.0450, -0.0350));
+            image.Resection = resection;
+
+            project.Images.Add(image);
+        }
+
+        project.Gcps.Add(new Gcp { Id = "K01", X = 1000, Y = 2000, Z = 88, Type = GcpType.Planimetric });
+        project.Gcps.Add(new Gcp { Id = "K02", X = 1050, Y = 2000, Z = 89, Type = GcpType.Planimetric });
+        project.Gcps.Add(new Gcp { Id = "K03", X = 1050, Y = 2050, Z = 90, Type = GcpType.Planimetric });
+        project.Gcps.Add(new Gcp { Id = "K04", X = 1000, Y = 2050, Z = 91, Type = GcpType.CheckPoint });
+
+        project.Pairs.Add(new StereoPair
+        {
+            Id = "DSC001-DSC002",
+            LeftImageId = "DSC001",
+            RightImageId = "DSC002",
+        });
+
+        return project;
+    }
 }
   

@@ -167,6 +167,8 @@ public partial class MainWindow
         }
 
         ShowResult(table);
+        // 交会点不写工程，但报告要用：把它记进本会话的那一份（同一点解两次只记一次）
+        RememberIntersection(PairName(), result);
         return run;
     }
 
@@ -286,6 +288,13 @@ public partial class MainWindow
         foreach (var source in succeeded.Select(p => p.Run.GeometrySource).Distinct())
         {
             Log("·", "几何来源：" + source);
+        }
+
+        // 报告只收地面坐标的交会点：模型坐标不是米制，写进"X (m)"就是谎话
+        foreach (var pair in succeeded.Where(p => !p.Run.IsModelCoordinates))
+        {
+            var label = $"{pair.Left.Id} / {pair.Right.Id}";
+            foreach (var p in pair.Run.Points) RememberIntersection(label, p.Ground);
         }
 
         if (!run.Success)

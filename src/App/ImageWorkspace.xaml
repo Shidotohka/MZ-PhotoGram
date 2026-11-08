@@ -65,36 +65,5 @@
                         Style="{StaticResource Viewport}"
                         Content="模型 M1 · 自由坐标系"
                         Margin="18"/>
-
-        <!-- 报告预览 -->
-        <Grid x:Name="ReportPanel" Visibility="Collapsed">
-            <Border Width="720" Background="#FFFFFF" BorderBrush="{StaticResource Line2Brush}"
-                    BorderThickness="1" Margin="0,28" HorizontalAlignment="Center">
-                <StackPanel Margin="40,32">
-                    <TextBlock Text="摄影测量计算报告" FontSize="17" FontWeight="SemiBold"/>
-                    <TextBlock Text="教学实验_01 · 相对定向 / 0001–0002" FontSize="11"
-                               Foreground="{StaticResource DimBrush}" Margin="0,6,0,0"/>
-                    <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,14"/>
-
-                    <TextBlock Text="一、输入数据" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{StaticResource AccentBrush}"/>
-                    <Border Height="1" Background="{StaticResource Panel3Brush}" Margin="0,18,0,0"/>
-                    <Border Height="1" Background="{StaticResource Panel3Brush}" Margin="0,10,0,0"/>
-
-                    <TextBlock Text="二、相对定向元素" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{StaticResource AccentBrush}" Margin="0,22,0,0"/>
-                    <Border Height="1" Background="{StaticResource Panel3Brush}" Margin="0,18,0,0"/>
-                    <Border Height="1" Background="{StaticResource Panel3Brush}" Margin="0,10,0,0"/>
-                    <Border Height="1" Background="{StaticResource Panel3Brush}" Margin="0,10,0,0"/>
-
-                    <TextBlock Text="三、精度与诊断" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{StaticResource AccentBrush}" Margin="0,22,0,0"/>
-                    <Border Height="1" Background="{StaticResource Panel3Brush}" Margin="0,18,0,0"/>
-
-                    <TextBlock Text="报告预览 · 待接入（M8）" FontSize="11"
-                               Foreground="{StaticResource DimBrush}" Margin="0,26,0,0"/>
-                </StackPanel>
-            </Border>
-        </Grid>
     </Grid>
 </UserControl>

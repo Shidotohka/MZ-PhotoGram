@@ -27,7 +27,7 @@ public partial class MainWindow
     private ResultWindow? _resultWindow;
 
     /// <summary>
-    /// 模块名 → 结果种类。「报告」「光束平差」没有结果，返回 null。
+    /// 模块名 → 结果种类。「光束平差」没有结果，返回 null。
     /// 窗口按它划作用域：这一步的结果只在这一步里看。
     /// </summary>
     private static ResultKind? KindOfModule(string module) => module switch
@@ -69,7 +69,7 @@ public partial class MainWindow
     /// <summary>
     /// 打开（或唤起）结果窗口。右栏按钮、菜单「查看 → 结果与残差…」与 F3 都走这里。
     ///
-    /// <para><paramref name="kind"/> 不给就用当前模块；没有结果的步骤（报告、光束平差）
+    /// <para><paramref name="kind"/> 不给就用当前模块；没有结果的步骤（光束平差）
     /// 直接不开。没有结果时也允许打开：空状态那句话正是「结果会留在这里」的说明。</para>
     /// </summary>
     private void OpenResultWindow(ResultKind? kind = null)
@@ -77,8 +77,8 @@ public partial class MainWindow
         var scope = kind ?? KindOfModule(_moduleName);
         if (scope is not { } target)
         {
-            // 「报告」「光束平差」没有结果；菜单/快捷键也得给一句，不能静默无反应
-            DiagSummary.Text = "! 这一步没有结果可看（报告还没实现）";
+            // 「光束平差」没有结果；菜单/快捷键也得给一句，不能静默无反应
+            DiagSummary.Text = "! 这一步没有结果可看（光束平差还没实现）";
             DiagSummary.Foreground = WarnBadge;
             return;
         }
@@ -262,10 +262,12 @@ public partial class MainWindow
     private void ClearResult()
     {
         _results.Clear();
+        _reportPoints.Clear();      // 交会点也是对着旧影像的像素算的，一起丢掉
+        _reportPointKeys.Clear();
         UpdateResultButton();
 
         // 窗口不订阅集合，这里显式让它退回空状态。
-        // 当前模块没有结果种类（报告/光束平差）时，留在窗口原来的作用域上清空。
+        // 当前模块没有结果种类（光束平差）时，留在窗口原来的作用域上清空。
         if (_resultWindow is { IsVisible: true } window)
         {
             window.ShowKind(KindOfModule(_moduleName) ?? window.Scope, null);
@@ -356,7 +358,7 @@ public partial class MainWindow
         table.Num("坐标轴旋转（I）", "θ_I", r.ThetaIDeg, "+0.0000;-0.0000", "°");
         table.Num("坐标轴旋转（J）", "θ_J", r.ThetaJDeg, "+0.0000;-0.0000", "°");
         table.Num("单位权中误差", "σ₀", r.Sigma0Mm, "0.000000", "mm",
-            r.Sigma0Mm > 0.02 ? "偏大" : "", r.Sigma0Mm > 0.02);
+            Judgement.InteriorSigma0(r.Sigma0Mm) ? "偏大" : "", Judgement.InteriorSigma0(r.Sigma0Mm));
         table.Num("最大残差", "max|v|", r.MaxAbsResidualMm, "0.000000", "mm");
         table.Add("多余观测", "r", r.Redundancy.ToString(CultureInfo.InvariantCulture), "", "2n − 6");
         table.Num("焦距", "f", focalLengthMm, "0.00", "mm",
@@ -365,8 +367,7 @@ public partial class MainWindow
         table.Head("框标", "vx (mm)", "vy (mm)", "说明");
         foreach (var v in r.Residuals)
         {
-            var big = r.Sigma0Mm > 0 &&
-                      Math.Max(Math.Abs(v.VxMm), Math.Abs(v.VyMm)) > 5 * r.Sigma0Mm;
+            var big = Judgement.FiducialResidual(v.VxMm, v.VyMm, r.Sigma0Mm);
             table.Row(big, v.Id.ToString(CultureInfo.InvariantCulture),
                 FmtSigned(v.VxMm, "0.000000"), FmtSigned(v.VyMm, "0.000000"),
                 big ? "偏大" : "");
@@ -436,10 +437,11 @@ public partial class MainWindow
         {
             var norm = Math.Sqrt(v.VxMm * v.VxMm + v.VyMm * v.VyMm);
             var ratio = r.Sigma0Mm > 0 ? norm / r.Sigma0Mm : 0;
-            table.Row(ratio > 3, v.GcpId,
+            var big = Judgement.ResectionResidual(ratio);
+            table.Row(big, v.GcpId,
                 FmtSigned(v.VxMm, "0.0000"), FmtSigned(v.VyMm, "0.0000"),
                 Fmt(norm, "0.0000"), Fmt(ratio, "0.00"),
-                ratio > 3 ? "偏大" : "");
+                big ? "偏大" : "");
         }
 
         return table;
@@ -486,7 +488,7 @@ public partial class MainWindow
         table.Num("摄影距离（左）", "S₁", r.RangeLeft, "0.0", "m");
         table.Num("摄影距离（右）", "S₂", r.RangeRight, "0.0", "m");
         table.Num("上下视差", "Δy", r.VerticalParallaxMm, "+0.0000;-0.0000", "mm",
-            "理想为 0", Math.Abs(r.VerticalParallaxMm) > 0.02);
+            "理想为 0", Judgement.VerticalParallax(r.VerticalParallaxMm));
         table.Num("交会差", "—", r.MissDistance, "0.0000", "m", "两条视线的最近距离");
         table.Num("投影系数（左）", "N₁", r.NLeft, "0.0000");
         table.Num("投影系数（右）", "N₂", r.NRight, "0.0000");
@@ -521,14 +523,15 @@ public partial class MainWindow
             ? double.NaN
             : outcome.Observations.Min(o => o.ConvergenceAngleDeg);
         table.Num("最差交会角", "min γ", worst, "0.00", "°",
-            worst < 15.0 ? "深度不可靠" : "越大越稳", worst < 15.0);
+            Judgement.SmallConvergenceAngle(worst) ? "深度不可靠" : "越大越稳",
+            Judgement.SmallConvergenceAngle(worst));
 
         table.Add("坐标系", "—", "模型系（比例尺未知）", "", "|b| = 1，形状对、尺寸不对");
 
         table.Head("点号", "模型 X", "模型 Y", "模型 Z", "交会角 (°)");
         foreach (var o in outcome.Observations)
         {
-            table.Row(o.ConvergenceAngleDeg < 15.0, o.GcpId,
+            table.Row(Judgement.SmallConvergenceAngle(o.ConvergenceAngleDeg), o.GcpId,
                 Fmt(o.Model.X, "0.0000"),
                 Fmt(o.Model.Y, "0.0000"),
                 Fmt(o.Model.Z, "0.0000"),
@@ -579,8 +582,8 @@ public partial class MainWindow
         table.Num("单位权中误差", "σ₀", r.Sigma0, "0.0000", "m",
             double.IsNaN(sigmaPx)
                 ? ""
-                : $"{sigmaPx:0.00} px　判据 ≤ 10 px",
-            !double.IsNaN(sigmaPx) && sigmaPx > 10.0);
+                : $"{sigmaPx:0.00} px　判据 ≤ {Judgement.AbsoluteSigma0Px:0} px",
+            Judgement.AbsoluteSigma0InPixels(sigmaPx));
         table.Num("最大不符值", "max", r.MaxAbsResidual, "0.0000", "m");
         table.Add("参与 / 检查点", "—", $"{run.Used.Count} / {run.Checks.Count}", "个",
             $"多余观测 {r.Redundancy}");
@@ -591,8 +594,8 @@ public partial class MainWindow
             : double.NaN;
         table.Add("点位配置", "σ₃/σ₁", Fmt(flatness, "0.0E+0"), "",
             double.IsNaN(flatness) ? ""
-                : flatness < 1e-3 ? "接近共面：高程弱" : "展得开",
-            !double.IsNaN(flatness) && flatness < 1e-3);
+                : Judgement.FlatModel(flatness) ? "接近共面：高程弱" : "展得开",
+            Judgement.FlatModel(flatness));
 
         if (r.MirrorSuspected)
         {
@@ -609,7 +612,7 @@ public partial class MainWindow
         foreach (var o in run.Used)
         {
             var ratio = r.Sigma0 > 0 ? o.ResidualLength / r.Sigma0 : double.NaN;
-            table.Row(ratio > 2.0, o.GcpId, Fmt(o.ResidualLength, "0.0000"), Fmt(ratio, "0.00"),
+            table.Row(Judgement.AbsoluteResidual(ratio), o.GcpId, Fmt(o.ResidualLength, "0.0000"), Fmt(ratio, "0.00"),
                 "参与");
         }
         foreach (var c in run.Checks)

@@ -9,15 +9,19 @@ using Photogrammetry.Core;
 
 namespace Photogrammetry.App;
 
-/// <summary>工作区形态，与设计规范 4.2 一一对应。</summary>
+/// <summary>
+/// 工作区形态，与设计规范 4.2 一一对应。
+///
+/// <para>没有「报告」形态：报告不是一步作业，它是把成果导成文档，
+/// 走的是「查看 ▾ → 成果报告」，不占工作区。</para>
+/// </summary>
 public enum WorkspaceMode
 {
     Single,
     /// <summary>刺点：左为控制点放大影像，右为整幅航摄影像。后方交会用这个。</summary>
     Pick,
     Double,
-    Model,
-    Report
+    Model
 }
 
 public sealed class ImageDropEventArgs : EventArgs
@@ -106,7 +110,6 @@ public partial class ImageWorkspace : UserControl
         PickPanel.Visibility = mode == WorkspaceMode.Pick ? Visibility.Visible : Visibility.Collapsed;
         DoublePanel.Visibility = mode == WorkspaceMode.Double ? Visibility.Visible : Visibility.Collapsed;
         ModelPanel.Visibility = mode == WorkspaceMode.Model ? Visibility.Visible : Visibility.Collapsed;
-        ReportPanel.Visibility = mode == WorkspaceMode.Report ? Visibility.Visible : Visibility.Collapsed;
 
         EnsureVisibleImage();
     }

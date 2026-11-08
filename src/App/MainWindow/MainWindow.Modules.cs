@@ -94,9 +94,6 @@ public partial class MainWindow
         {
             ModuleHint.Text = info.Hint;
             Workspace.SetMode(info.Mode);
-            PointTools.Visibility = info.Mode == WorkspaceMode.Report
-                ? Visibility.Collapsed
-                : Visibility.Visible;
             RefreshTree();
         }
 

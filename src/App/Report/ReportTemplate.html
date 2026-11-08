@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{DOC_TITLE}}</title>
+<!--
+  成果报告模板。由程序读入、填空、另存成 .html，然后交给浏览器打印。
+
+  这份文件只管"长什么样"：页面骨架、样式、表格骨架都在这里。
+  程序只填下面七个位置，不往这里拼标签——
+    {{DOC_TITLE}}  <title> 里的整句标题
+    {{PROJECT}}    工程名（大标题）
+    {{METHOD}}     作业方法（副标题第一段）
+    {{META}}       副标题其余部分：文件名、生成时刻
+    {{SUMMARY}}    摘要条（<li> 片段）
+    {{SECTIONS}}   各节的表格（由 tpl-section 复制而来）
+    {{LEGEND}}     标红说明（文字由程序的判据常量生成，免得这里写死一份）
+
+  想改版式就改这个文件，然后重新生成一次报告；不用动代码。
+-->
+<style>
+  :root {
+    --ink: #1a1d21;
+    --sub: #5d6773;
+    --rule: #d2d8de;
+    --head-bg: #f4f6f8;
+    --mark: #b3261e;
+    --sans: "Microsoft YaHei", "SimHei", sans-serif;
+    --serif: "Times New Roman", "SimSun", serif;
+  }
+
+  @page { size: A4 portrait; margin: 18mm 15mm 16mm; }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--serif);
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: var(--ink);
+    background: #eef0f2;
+    padding: 28px 12px 56px;
+  }
+
+  /* 屏幕上一张 A4 纸；打印时把纸的边距与阴影去掉，交给 @page */
+  .sheet {
+    max-width: 190mm;
+    margin: 0 auto;
+    background: #fff;
+    padding: 16mm 14mm 18mm;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .16);
+  }
+
+  .hint {
+    max-width: 190mm;
+    margin: 0 auto 10px;
+    font-family: var(--sans);
+    font-size: 9pt;
+    color: #7b8794;
+    text-align: right;
+  }
+
+  /* ---------- 抬头 ---------- */
+
+  .kicker {
+    font-family: var(--sans);
+    font-size: 8.5pt;
+    letter-spacing: .22em;
+    color: var(--sub);
+    margin: 0 0 8pt;
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-size: 19pt;
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 0;
+    word-break: break-all;
+  }
+
+  .meta {
+    font-size: 9.5pt;
+    color: var(--sub);
+    margin: 7pt 0 0;
+  }
+
+  /* ---------- 摘要条 ---------- */
+
+  .chips {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    margin: 12pt 0 0;
+    padding: 7pt 0;
+    border-top: .8pt solid var(--rule);
+    border-bottom: .8pt solid var(--rule);
+  }
+
+  .chips li {
+    font-size: 9.5pt;
+    color: var(--sub);
+    padding-right: 16pt;
+  }
+
+  .chips b {
+    color: var(--ink);
+    font-weight: 600;
+    margin-right: 4pt;
+  }
+
+  /* ---------- 节 ---------- */
+
+  section { margin-top: 16pt; }
+
+  h2 {
+    font-family: var(--sans);
+    font-size: 11.5pt;
+    font-weight: 600;
+    margin: 0 0 6pt;
+    break-after: avoid;
+  }
+
+  h2 .no {
+    color: var(--sub);
+    font-weight: 400;
+    margin-right: 7pt;
+  }
+
+  /* ---------- 三线表 ---------- */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    break-inside: auto;
+  }
+
+  thead th {
+    background: var(--head-bg);
+    font-family: var(--sans);
+    font-weight: 600;
+    padding: 4pt 5pt;
+    border-top: 1.2pt solid var(--ink);
+    border-bottom: .8pt solid var(--ink);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 3pt 5pt;
+    border-bottom: .5pt solid var(--rule);
+    white-space: nowrap;
+  }
+
+  /* 最后一行压一条粗线，凑成三线表 */
+  tbody tr:last-child td { border-bottom: 1.2pt solid var(--ink); }
+
+  /* 数字右对齐、文字左对齐；每位数的宽度一致，小数点才对得上 */
+  .n {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .t { text-align: left; }
+
+  /* 标红：超出判据。只用颜色不用底色——黑白打印时底色会糊成灰块 */
+  .w {
+    color: var(--mark);
+    font-weight: 600;
+  }
+
+  /* 整行没有数（未计算、缺数据） */
+  .e {
+    text-align: center;
+    color: var(--sub);
+    padding: 8pt 0;
+  }
+
+  tr { break-inside: avoid; }
+
+  .note {
+    font-size: 9pt;
+    color: var(--sub);
+    margin: 5pt 0 0;
+  }
+
+  .note:empty { display: none; }
+
+  /* ---------- 页脚 ---------- */
+
+  footer {
+    margin-top: 20pt;
+    padding-top: 7pt;
+    border-top: .8pt solid var(--rule);
+    font-family: var(--sans);
+    font-size: 8.5pt;
+    color: var(--sub);
+  }
+
+  footer .mark { color: var(--mark); font-weight: 600; }
+
+  /* ---------- 打印 ---------- */
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    .sheet { box-shadow: none; margin: 0; max-width: none; padding: 0; }
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<p class="hint">打印：Ctrl+P　·　存成 PDF 在打印对话框的「目标」里选「另存为 PDF」</p>
+
+<article class="sheet">
+  <header>
+    <p class="kicker">成 果 报 告</p>
+    <h1>{{PROJECT}}</h1>
+    <p class="meta">{{METHOD}}　·　{{META}}</p>
+  </header>
+
+  <ul class="chips">{{SUMMARY}}</ul>
+
+{{SECTIONS}}
+
+  <footer>
+    <p style="margin:0">{{LEGEND}}</p>
+    <p style="margin:4pt 0 0">摄影测量工作台 v0.1　·　本页数值由程序解算后直接输出</p>
+  </footer>
+</article>
+
+<!-- ============ 表格骨架 ============
+     每节都是同一张表：标题、表头、行、脚注。程序把这一块复制 N 份，
+     只替换下面四个位置。标签全在这份文件里，代码里只有 <td>/<th>。 -->
+<template id="tpl-section">
+  <section>
+    <h2><span class="no">{{NO}}</span>{{TITLE}}</h2>
+    <table>
+      <thead><tr>{{HEAD}}</tr></thead>
+      <tbody>{{ROWS}}</tbody>
+    </table>
+    <p class="note">{{NOTE}}</p>
+  </section>
+</template>
+
+</body>
+</html>
