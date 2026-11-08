@@ -277,19 +277,6 @@ public static class ModelIntersectionTask
         ArgumentNullException.ThrowIfNull(run);
         if (run.Failure != ModelIntersectionFailure.None) return;
 
-        var solution = new ModelSolution { TimeUtc = DateTimeOffset.UtcNow };
-        foreach (var o in run.Observations)
-        {
-            solution.Points.Add(new ModelSolutionPoint
-            {
-                GcpId = o.GcpId,
-                X = o.Model.X,
-                Y = o.Model.Y,
-                Z = o.Model.Z,
-                ConvergenceAngleDeg = o.ConvergenceAngleDeg,
-            });
-        }
-
-        pair.Model = solution;
+        pair.Model = ResultBlocks.Model(run);
     }
 }

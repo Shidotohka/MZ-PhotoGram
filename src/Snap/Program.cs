@@ -2252,6 +2252,9 @@ internal static class Program
             if (!ok) Environment.ExitCode = 1;
         }
 
+        // ---- 重开工程：结果本来就在文件里，应该原样回到结果集合（M7.5 第 4 步）----
+        ReopenCheck(win);
+
         Console.WriteLine(win.ResultWindowIsOpen
             ? "[PASS] 解完自动打开结果窗口"
             : "[FAIL] 结果窗口没打开，用户看不到结果");
@@ -4020,8 +4023,7 @@ internal static class Program
         Environment.ExitCode = failures == 0 ? 0 : 1;
     }
 
-    private static void WritePng(string path, int width, int height, int seed)
-    {
+    private static void WritePng(string path, int width, int height, int seed)    {
         var stride = width * 3;
         var pixels = new byte[stride * height];
         for (var i = 0; i < pixels.Length; i++) pixels[i] = (byte)((i * 7 + seed * 31) % 251);
@@ -4032,5 +4034,62 @@ internal static class Program
         using var stream = File.Create(path);
         encoder.Save(stream);
     }
+
+    /// <summary>
+    /// 重开工程的端到端（M7.5 第 4 步）：接受过的结果本来就在 <c>.pht</c> 里，打开后应当
+    /// 原样回到结果集合。判据是<b>表格文本逐字相同</b>——它一次钉住两件事：
+    /// 存盘没丢数、而且"解算后"与"读回来"走的是同一套排版（不是两份格式化）。
+    /// </summary>
+    private static void ReopenCheck(MainWindow win)
+    {
+        var before = DumpResults(win);
+        var path = Path.Combine(Path.GetTempPath(), "pgm-reopen.pht");
+        win.SaveProjectForTooling(path);
+
+        var task = win.OpenProjectAsync(path);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!task.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            Pump(win);
+            System.Threading.Thread.Sleep(20);
+        }
+
+        Pump(win);
+        File.Delete(path);
+
+        var after = DumpResults(win);
+
+        Console.WriteLine(before.Count == after.Count
+            ? $"[PASS] 重开后结果份数不变（{before.Count} 份：{string.Join("、", win.SnapshotResults().Select(r => r.Kind?.ToString() ?? "—"))}）"
+            : $"[FAIL] 重开后结果份数变了：{before.Count} → {after.Count}");
+        if (before.Count != after.Count) Environment.ExitCode = 1;
+
+        var diff = -1;
+        for (var k = 0; k < Math.Min(before.Count, after.Count); k++)
+        {
+            if (before[k] != after[k]) { diff = k; break; }
+        }
+
+        if (diff < 0)
+        {
+            Console.WriteLine($"[PASS] 每份结果逐字相同（{before.Sum(d => d.Length)} 字符）");
+        }
+        else
+        {
+            Environment.ExitCode = 1;
+            Console.WriteLine($"[FAIL] 第 {diff + 1} 份结果对不上：");
+            Console.WriteLine("  存盘前：" + before[diff].Replace("\n", " ⏎ "));
+            Console.WriteLine("  重开后：" + after[diff].Replace("\n", " ⏎ "));
+        }
+    }
+
+    /// <summary>把结果集合摊成文本：标题 + 表头 + 每一行（含警告标记）+ 页脚。</summary>
+    private static List<string> DumpResults(MainWindow win) => win.SnapshotResults()
+        .Select(s => string.Join("\n",
+            new[] { s.Title, string.Join(" | ", s.Headers) }
+                .Concat(s.Items.Select(r => $"{r.Name}\t{r.Symbol}\t{r.Value}\t{r.Unit}\t{r.Note}\t{r.Warn}"))
+                .Concat(s.Rows.Select(r => string.Join("\t", r.Cells) + $"\t{r.Warn}"))
+                .Concat(new[] { s.Note })))
+        .ToList();
 }
   

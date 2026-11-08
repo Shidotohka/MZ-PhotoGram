@@ -113,11 +113,22 @@ public sealed class AbsoluteOrientationRun
 
     public bool Success => Failure == AbsoluteOrientationFailure.None;
 
+    /// <summary>
+    /// 从文件还原时用的"存档值"：重开工程后没有逐点变换后的位置，但最大偏差本来就在结果块里，
+    /// 直接用，别为了这两个数再去重建旋转矩阵。为 null 时按逐点现算（刚解完那条路）。
+    /// </summary>
+    public double? StoredCheckPlanimetricMax { get; init; }
+
+    /// <inheritdoc cref="StoredCheckPlanimetricMax"/>
+    public double? StoredCheckHeightMax { get; init; }
+
     /// <summary>检查点的最大平面（X/Y）偏差；没有检查点时为 NaN。</summary>
     public double CheckPlanimetricMax
     {
         get
         {
+            if (StoredCheckPlanimetricMax is { } stored) return stored;
+
             var worst = double.NaN;
             foreach (var c in Checks)
             {
@@ -136,6 +147,8 @@ public sealed class AbsoluteOrientationRun
     {
         get
         {
+            if (StoredCheckHeightMax is { } stored) return stored;
+
             var worst = double.NaN;
             foreach (var c in Checks)
             {
@@ -383,52 +396,8 @@ public static class AbsoluteOrientationTask
     {
         ArgumentNullException.ThrowIfNull(pair);
         ArgumentNullException.ThrowIfNull(run);
-        if (!run.Success || run.Result is not { } result) return;
+        if (!run.Success) return;
 
-        var solution = new AbsoluteSolution
-        {
-            Lambda = result.Scale,
-            Phi = result.PhiDeg,
-            Omega = result.OmegaDeg,
-            Kappa = result.KappaDeg,
-            Dx = result.X0,
-            Dy = result.Y0,
-            Dz = result.Z0,
-            GroundOrder = run.GroundOrder,
-            Sigma0 = result.Sigma0,
-            Gsd = run.GroundSampleDistance,
-            HbRatio = run.DepthAmplification,
-            TimeUtc = DateTimeOffset.UtcNow,
-        };
-
-        foreach (var o in run.Used)
-        {
-            AddDeviation(solution, o.GcpId, result.Transform(o.Model), o.Ground, run.GroundOrder, false);
-        }
-
-        foreach (var c in run.Checks)
-        {
-            // 检查点的"变换后位置"在解算时已经算好，直接用，别拿七参数再算一遍
-            var transformed = c.Transformed ?? result.Transform(c.Model);
-            AddDeviation(solution, c.GcpId, transformed, c.Ground, run.GroundOrder, true);
-        }
-
-        pair.Absolute = solution;
-    }
-
-    private static void AddDeviation(AbsoluteSolution solution, string gcpId, GroundPointM transformed,
-        GroundPointM groundInFile, GroundAxisOrder order, bool isCheck)
-    {
-        var ground = GroundAxes.ToMathFrame(groundInFile, order);
-        var dx = transformed.X - ground.X;
-        var dy = transformed.Y - ground.Y;
-
-        solution.Points.Add(new AbsoluteSolutionPoint
-        {
-            GcpId = gcpId,
-            Dxy = Math.Sqrt(dx * dx + dy * dy),
-            Dz = transformed.Z - ground.Z,
-            Check = isCheck,
-        });
+        pair.Absolute = ResultBlocks.Absolute(run);
     }
 }

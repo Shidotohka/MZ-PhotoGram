@@ -57,6 +57,14 @@ public partial class MainWindow
     /// <summary>某一步当前的结果份数（工具用）。</summary>
     internal int ResultCountForTooling(ResultKind kind) => _results.CountOf(kind);
 
+    /// <summary>工具：把当前工程存到指定路径（`--reopen` 要拿它做"存盘→重开"的对照）。</summary>
+    internal void SaveProjectForTooling(string path)
+    {
+        ProjectFile.Save(_project, path);
+        _projectPath = path;
+        UpdateProjectTitle();
+    }
+
     /// <summary>
     /// 同时发起两次载入（模拟"两张片几乎同时拖进来"），用来验载入串行闸：
     /// 两张必须落进两个不同的视窗，且右栏状态是两者都在。

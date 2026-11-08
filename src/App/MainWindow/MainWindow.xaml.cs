@@ -194,6 +194,7 @@ public partial class MainWindow : Window
             UpdateStatusCounts();
             UpdateProjectTitle();
             ClearResult();
+            HydrateResults();     // 已入账的结果读回结果集合：重开工程不用重解
 
             var missing = project.Images.Count(i => i.FileState == ImageFileState.Missing);
             DiagSummary.Text = missing > 0

@@ -176,7 +176,36 @@ public static class ProjectFile
                 Iterations = q.Iterations,
                 UsedCount = q.UsedCount,
                 RejectedCount = q.RejectedCount,
-                TimeUtc = q.TimeUtc
+                Redundancy = q.Redundancy,
+                MaxAbsResidual = q.MaxAbsResidualMm,
+                TimeUtc = q.TimeUtc,
+                Residuals = q.Residuals.Select(v => new PointResidualDto
+                {
+                    GcpId = v.GcpId,
+                    Vx = v.VxMm,
+                    Vy = v.VyMm
+                }).ToList()
+            } : null,
+            InteriorQuality = i.InteriorQuality is { } iq ? new InteriorQualityDto
+            {
+                Sx = iq.SxMm,
+                Sy = iq.SyMm,
+                PixelSize = iq.PixelSizeMm,
+                X0 = iq.X0Mm,
+                Y0 = iq.Y0Mm,
+                PrincipalI = iq.PrincipalI,
+                PrincipalJ = iq.PrincipalJ,
+                ThetaI = iq.ThetaIDeg,
+                ThetaJ = iq.ThetaJDeg,
+                Sigma0 = iq.Sigma0Mm,
+                MaxAbsResidual = iq.MaxAbsResidualMm,
+                Redundancy = iq.Redundancy,
+                Residuals = iq.Residuals.Select(v => new FiducialResidualDto
+                {
+                    Id = v.FiducialId,
+                    Vx = v.VxMm,
+                    Vy = v.VyMm
+                }).ToList()
             } : null,
             Status = i.Status.ToString(),
             HasExterior = i.Exterior is not null,
@@ -266,6 +295,15 @@ public static class ProjectFile
                 Dz = abs.Dz,
                 GroundOrder = abs.GroundOrder.ToString(),
                 Sigma0 = abs.Sigma0,
+                Rms3D = abs.Rms3D,
+                MaxAbsResidual = abs.MaxAbsResidual,
+                Redundancy = abs.Redundancy,
+                UsedCount = abs.UsedCount,
+                CheckCount = abs.CheckCount,
+                Flatness = double.IsNaN(abs.Flatness) ? null : abs.Flatness,
+                MirrorSuspected = abs.MirrorSuspected,
+                CheckPlanimetricMax = double.IsNaN(abs.CheckPlanimetricMax) ? null : abs.CheckPlanimetricMax,
+                CheckHeightMax = double.IsNaN(abs.CheckHeightMax) ? null : abs.CheckHeightMax,
                 Gsd = abs.Gsd,
                 HbRatio = abs.HbRatio,
                 TimeUtc = abs.TimeUtc,
@@ -402,8 +440,42 @@ public static class ProjectFile
                     Iterations = quality.Iterations,
                     UsedCount = quality.UsedCount,
                     RejectedCount = quality.RejectedCount,
+                    Redundancy = quality.Redundancy,
+                    MaxAbsResidualMm = quality.MaxAbsResidual,
                     TimeUtc = quality.TimeUtc
                 };
+
+                foreach (var v in quality.Residuals ?? new List<PointResidualDto>())
+                {
+                    if (string.IsNullOrWhiteSpace(v.GcpId)) continue;
+                    item.Resection.Residuals.Add(new ResectionResidualValue(v.GcpId, v.Vx, v.Vy));
+                }
+            }
+
+            if (i.InteriorQuality is { } interiorQuality)
+            {
+                var fiducialQuality = new InteriorQuality
+                {
+                    SxMm = interiorQuality.Sx,
+                    SyMm = interiorQuality.Sy,
+                    PixelSizeMm = interiorQuality.PixelSize,
+                    X0Mm = interiorQuality.X0,
+                    Y0Mm = interiorQuality.Y0,
+                    PrincipalI = interiorQuality.PrincipalI,
+                    PrincipalJ = interiorQuality.PrincipalJ,
+                    ThetaIDeg = interiorQuality.ThetaI,
+                    ThetaJDeg = interiorQuality.ThetaJ,
+                    Sigma0Mm = interiorQuality.Sigma0,
+                    MaxAbsResidualMm = interiorQuality.MaxAbsResidual,
+                    Redundancy = interiorQuality.Redundancy,
+                };
+
+                foreach (var v in interiorQuality.Residuals ?? new List<FiducialResidualDto>())
+                {
+                    fiducialQuality.Residuals.Add(new FiducialResidualValue(v.Id, v.Vx, v.Vy));
+                }
+
+                item.InteriorQuality = fiducialQuality;
             }
 
             foreach (var m in i.FiducialMarks ?? new List<FiducialMarkDto>())
@@ -517,6 +589,15 @@ public static class ProjectFile
                         ? order
                         : GroundAxisOrder.EastNorth,
                     Sigma0 = abs.Sigma0,
+                    Rms3D = abs.Rms3D,
+                    MaxAbsResidual = abs.MaxAbsResidual,
+                    Redundancy = abs.Redundancy,
+                    UsedCount = abs.UsedCount,
+                    CheckCount = abs.CheckCount,
+                    Flatness = abs.Flatness ?? double.NaN,
+                    MirrorSuspected = abs.MirrorSuspected,
+                    CheckPlanimetricMax = abs.CheckPlanimetricMax ?? double.NaN,
+                    CheckHeightMax = abs.CheckHeightMax ?? double.NaN,
                     Gsd = abs.Gsd,
                     HbRatio = abs.HbRatio,
                     TimeUtc = abs.TimeUtc
@@ -675,6 +756,9 @@ public static class ProjectFile
         /// <summary>v4：后方交会质量。</summary>
         public ResectionDto? Resection { get; set; }
 
+        /// <summary>v4：框标内定向的质量（反算内参 + 逐框标残差）。</summary>
+        public InteriorQualityDto? InteriorQuality { get; set; }
+
         public double FocalLength { get; set; }
         public double X0 { get; set; }
         public double Y0 { get; set; }
@@ -761,6 +845,18 @@ public static class ProjectFile
         public double Sigma0 { get; set; }
         public double Gsd { get; set; }
         public double HbRatio { get; set; }
+
+        /// <summary>v4 补的质量指标。可能为 NaN 的三个用可空类型：JSON 里写 null，读回来是 NaN。</summary>
+        public double Rms3D { get; set; }
+        public double MaxAbsResidual { get; set; }
+        public int Redundancy { get; set; }
+        public int UsedCount { get; set; }
+        public int CheckCount { get; set; }
+        public double? Flatness { get; set; }
+        public bool MirrorSuspected { get; set; }
+        public double? CheckPlanimetricMax { get; set; }
+        public double? CheckHeightMax { get; set; }
+
         public DateTimeOffset TimeUtc { get; set; }
         public List<AbsolutePointDto>? Points { get; set; }
     }
@@ -793,7 +889,47 @@ public static class ProjectFile
         public int Iterations { get; set; }
         public int UsedCount { get; set; }
         public int RejectedCount { get; set; }
+        public int Redundancy { get; set; }
+        public double MaxAbsResidual { get; set; }
         public DateTimeOffset TimeUtc { get; set; }
+
+        /// <summary>逐点残差，顺序与解算时的点表一致。</summary>
+        public List<PointResidualDto>? Residuals { get; set; }
+    }
+
+    /// <summary>一个点的像点残差（mm）。</summary>
+    private sealed class PointResidualDto
+    {
+        public string? GcpId { get; set; }
+        public double Vx { get; set; }
+        public double Vy { get; set; }
+    }
+
+    /// <summary>v4：框标内定向的质量指标（六系数在 affine 里）。</summary>
+    private sealed class InteriorQualityDto
+    {
+        public double Sx { get; set; }
+        public double Sy { get; set; }
+        public double PixelSize { get; set; }
+        public double X0 { get; set; }
+        public double Y0 { get; set; }
+        public double PrincipalI { get; set; }
+        public double PrincipalJ { get; set; }
+        public double ThetaI { get; set; }
+        public double ThetaJ { get; set; }
+        public double Sigma0 { get; set; }
+        public double MaxAbsResidual { get; set; }
+        public int Redundancy { get; set; }
+
+        /// <summary>逐框标残差（mm）。</summary>
+        public List<FiducialResidualDto>? Residuals { get; set; }
+    }
+
+    private sealed class FiducialResidualDto
+    {
+        public int Id { get; set; }
+        public double Vx { get; set; }
+        public double Vy { get; set; }
     }
 
 

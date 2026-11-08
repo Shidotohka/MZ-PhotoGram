@@ -214,21 +214,7 @@ public static class ResectionTask
         if (!run.Success || run.Result is not { } result) return;
 
         Apply(image, result, run.Evidence?.Order ?? GroundAxisOrder.EastNorth);
-
-        image.Resection = new ResectionQuality
-        {
-            Sigma0Mm = result.Sigma0Mm,
-            ParamSd = new[]
-            {
-                result.MXs, result.MYs, result.MZs,
-                result.MPhi, result.MOmega, result.MKappa,
-            },
-            Condition = result.Condition,
-            Iterations = result.Iterations,
-            UsedCount = result.UsedCount,
-            RejectedCount = run.Skipped.Count,
-            TimeUtc = DateTimeOffset.UtcNow,
-        };
+        image.Resection = ResultBlocks.Resection(run);
     }
 
     /// <summary>把解算结果写回模型：外方位、影像状态、地面轴序、逐点残差与像平面坐标。</summary>

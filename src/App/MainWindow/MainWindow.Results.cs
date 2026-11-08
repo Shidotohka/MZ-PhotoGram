@@ -97,6 +97,76 @@ public partial class MainWindow
     }
 
     /// <summary>
+    /// 打开工程后把已入账的结果读回结果集合（M7.5 第 4 步）。
+    ///
+    /// <para><b>只走一条路</b>：先把结果块还原成"任务结果对象"（<c>StoredResults</c>），
+    /// 再交给与解算后**完全相同**的那几个排表函数。所以"屏幕上是什么"与"文件里是什么"
+    /// 不会各写一份格式化——这也是重开工程后表格还能逐字对上的原因。</para>
+    ///
+    /// <para>读回来的结果状态是<b>已入账</b>、不挂 <c>OnAccept</c>：它已经在工程里了，
+    /// 再点一次「接受」没有意义（按钮也是禁用的）。</para>
+    /// </summary>
+    internal void HydrateResults()
+    {
+        foreach (var image in _project.Images)
+        {
+            // 内定向"有内参"不等于"有结果"：v3 文件、或解算前就填好的内参，都没有 `interiorTimeUtc`。
+            // 只有入账过的那次才留了时刻，才该在结果窗口里出现。
+            if (image.Interior is { } interior && image.InteriorTimeUtc is not null)
+            {
+                var table = StoredResults.Interior(image) is { } fiducial
+                    ? InteriorResult(image, fiducial, interior.FocalLength)
+                    : ParametricInteriorResult(image, interior);
+                _results.Put(Hydrated(table, image.InteriorTimeUtc));
+            }
+
+            if (image.Resection is { } resection && StoredResults.Resection(image) is { } resectionRun)
+            {
+                _results.Put(Hydrated(ResectionResult(image, resectionRun.Result!), resection.TimeUtc));
+            }
+        }
+
+        foreach (var pair in _project.Pairs)
+        {
+            if (pair.Relative is { } relative && StoredResults.Relative(_project, pair) is { } relativeRun)
+            {
+                _results.Put(Hydrated(RelativeResultTable(relativeRun), relative.TimeUtc));
+            }
+
+            if (pair.Model is { } model && StoredResults.Model(_project, pair) is { } outcome)
+            {
+                _results.Put(Hydrated(ModelResultTable(outcome), model.TimeUtc));
+            }
+
+            if (pair.Absolute is { } absolute && StoredResults.Absolute(_project, pair) is { } absoluteRun)
+            {
+                _results.Put(Hydrated(AbsoluteResultTable(absoluteRun), absolute.TimeUtc));
+            }
+        }
+
+        UpdateResultButton();
+        if (_resultWindow is { IsVisible: true } window)
+        {
+            window.ShowKind(window.Scope, _results.LatestOf(window.Scope));
+        }
+    }
+
+    /// <summary>刚读回来的结果：已入账、时刻取存档的、不再挂入账动作。</summary>
+    private static SolveResult Hydrated(SolveResult result, DateTimeOffset? solvedAt)
+    {
+        result.State = ResultState.Accepted;
+        result.OnAccept = null;
+
+        if (solvedAt is { } at)
+        {
+            result.SolvedAt = at.LocalDateTime;
+            result.AcceptedAt = at.LocalDateTime;
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// 接受一份结果（ADR-26）：写进工程 → 记日志 → 立即保存 → 刷新受影响的界面。
     ///
     /// <para>写工程那一步由解算方挂在 <see cref="SolveResult.OnAccept"/> 上——只有它手里
@@ -547,7 +617,7 @@ public partial class MainWindow
             table.Row(false, c.GcpId, "—", "—", "检查点");
         }
 
-        table.Note = "结果不落盘：.pht 的 models[] 仍为空，重开工程要再解一次。";
+        table.Note = "按「接受」后这批数写进 pairs[].absolute；重开工程直接读回来，不用再解一次。";
         return table;
     }
 

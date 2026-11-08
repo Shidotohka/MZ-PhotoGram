@@ -98,6 +98,9 @@ public sealed class ImageItem
     /// <summary>后方交会的结果质量（σ₀、参数中误差、条件数……）。外方位本身在 <see cref="Exterior"/>。</summary>
     public ResectionQuality? Resection { get; set; }
 
+    /// <summary>框标内定向的质量指标。参数式内定向没有这一块。</summary>
+    public InteriorQuality? InteriorQuality { get; set; }
+
     /// <summary>
     /// 后方交会判定出的地面轴序。只用于显示时的换轴换算，<b>不写盘</b>——
     /// 它是从观测数据反推出来的结论，不是输入。没做过后方交会时为 null。
@@ -275,6 +278,9 @@ public sealed class AffineInterior
     public double B2 { get; set; }
 }
 
+/// <summary>后方交会逐点的残差（mm），顺序与解算时的点表一致。</summary>
+public sealed record ResectionResidualValue(string GcpId, double VxMm, double VyMm);
+
 /// <summary>
 /// 后方交会的<b>质量指标</b>。外方位本身在 <see cref="ImageItem.Exterior"/> 里（v2 起就有），
 /// 这一块补的是"这次解靠不靠得住"——没有它，重开工程只剩六个参数，σ₀ 与条件数就再也拿不回来。
@@ -293,10 +299,60 @@ public sealed class ResectionQuality
     public int Iterations { get; set; }
     public int UsedCount { get; set; }
 
+    /// <summary>多余观测数 = 2n − 6。</summary>
+    public int Redundancy { get; set; }
+
+    /// <summary>最大残差绝对值，mm。</summary>
+    public double MaxAbsResidualMm { get; set; }
+
     /// <summary>被粗差判据剔除的点数。</summary>
     public int RejectedCount { get; set; }
 
+    /// <summary>
+    /// 逐点残差。<b>存它是因为结果表有一行一点</b>：只存 σ₀ 的话，重开工程后
+    /// "哪个点偏大"这件事就没人知道了。表里显示的就是这几个数。
+    /// </summary>
+    public List<ResectionResidualValue> Residuals { get; } = new();
+
     public DateTimeOffset TimeUtc { get; set; }
+}
+
+/// <summary>框标内定向逐点的残差（mm）。</summary>
+public sealed record FiducialResidualValue(int FiducialId, double VxMm, double VyMm);
+
+/// <summary>
+/// 框标内定向的质量指标。六系数在 <see cref="ImageItem.Affine"/> 里，这一块是"
+/// 反算出的内参 + 这次解的评价"：没有它，重开工程只知道六个系数，排出不结果表。
+/// </summary>
+public sealed class InteriorQuality
+{
+    /// <summary>I 向比例尺（mm/像元）。</summary>
+    public double SxMm { get; set; }
+
+    /// <summary>J 向比例尺（mm/像元）。</summary>
+    public double SyMm { get; set; }
+
+    /// <summary>等效像元尺寸 (s_x+s_y)/2，mm/像元。</summary>
+    public double PixelSizeMm { get; set; }
+
+    public double X0Mm { get; set; }
+    public double Y0Mm { get; set; }
+
+    /// <summary>像主点的像元坐标。</summary>
+    public double PrincipalI { get; set; }
+    public double PrincipalJ { get; set; }
+
+    /// <summary>两轴的旋转角，度。</summary>
+    public double ThetaIDeg { get; set; }
+    public double ThetaJDeg { get; set; }
+
+    public double Sigma0Mm { get; set; }
+    public double MaxAbsResidualMm { get; set; }
+
+    /// <summary>多余观测数 = 2n − 6。</summary>
+    public int Redundancy { get; set; }
+
+    public List<FiducialResidualValue> Residuals { get; } = new();
 }
 
 /// <summary>模型交会里的一个控制点：模型坐标 + 交会角。</summary>
@@ -359,6 +415,32 @@ public sealed class AbsoluteSolution
 
     /// <summary>单位权中误差，m。</summary>
     public double Sigma0 { get; set; }
+
+    /// <summary>控制点不符值的三维合量 RMS，m。</summary>
+    public double Rms3D { get; set; }
+
+    /// <summary>最大不符值绝对值，m。</summary>
+    public double MaxAbsResidual { get; set; }
+
+    /// <summary>多余观测数 = 3n − 7。</summary>
+    public int Redundancy { get; set; }
+
+    /// <summary>参与解算的控制点数 / 检查点数。</summary>
+    public int UsedCount { get; set; }
+    public int CheckCount { get; set; }
+
+    /// <summary>
+    /// 点位配置的扁平度 $\sigma_3/\sigma_1$（$H=\sum m'g'^{\top}$ 的奇异值之比）。
+    /// 小到 $10^{-3}$ 量级说明控制点接近共面，高程全靠倾角外推。
+    /// </summary>
+    public double Flatness { get; set; }
+
+    /// <summary>拟合时怀疑控制点数据是镜像（左右手系搞反）。</summary>
+    public bool MirrorSuspected { get; set; }
+
+    /// <summary>检查点的最大平面 / 高程偏差，m。没有检查点时为 NaN。</summary>
+    public double CheckPlanimetricMax { get; set; } = double.NaN;
+    public double CheckHeightMax { get; set; } = double.NaN;
 
     /// <summary>地面采样间隔，m/像元。</summary>
     public double Gsd { get; set; }
