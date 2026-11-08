@@ -452,7 +452,7 @@ PGM_API int32_t pgm_epipolar_lines(const pgm_epipolar_input* in,
  *   e1 = (-f b_x / b_z, -f b_y / b_z)
  *   e2 = (-f v_u / v_w, -f v_v / v_w)，v = R b
  *
- * 注意 e2 用的是 R b 而不是 R^T b：[核线算法.md] 里写 R^T 是因为那份推导的 R 是
+ * 注意 e2 用的是 R b 而不是 R^T b：[算法笔记 §10] 里写 R^T 是因为那份推导的 R 是
  * 「像 -> 辅助系」，与本库出口的 rotation（辅助系 -> 像）互为转置。
  *
  * 近垂直摄影时 b_z、v_w 都接近 0，核点跑到无穷远：这时 *out_at_infinity 置 1，

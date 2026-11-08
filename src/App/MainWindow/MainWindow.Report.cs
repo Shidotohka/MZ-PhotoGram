@@ -36,22 +36,34 @@ public partial class MainWindow
     /// <summary>同一点重解一次不该在报告里多出一行，按「像对 + 位置」去重。</summary>
     private readonly HashSet<(string Pair, long X, long Y, long Z)> _reportPointKeys = new();
 
-    private void ExportReport_Click(object sender, RoutedEventArgs e)
+    private void ExportReport_Click(object sender, RoutedEventArgs e) =>
+        ExportReport(ReportLine.BackIntersection);
+
+    private void ExportRelativeReport_Click(object sender, RoutedEventArgs e) =>
+        ExportReport(ReportLine.RelativeAbsolute);
+
+    /// <summary>
+    /// 导出某一条线的报告：查有没有成果 → 选路径 → 生成 → 开浏览器。
+    ///
+    /// <para><b>入口按线分两个，不做一个"选哪种"的对话框</b>：报告是"这条线做完了，导一份"，
+    /// 用户心里想的是哪条线，菜单上就该有哪一条。两条线各点各的，也不需要判断"你当前在哪个模块"。</para>
+    /// </summary>
+    private void ExportReport(ReportLine line)
     {
-        if (!ReportBuilder.HasAnything(_project))
+        if (!ReportBuilder.HasAnything(_project, line))
         {
-            DiagSummary.Text = "! 还没有可写进报告的成果：内定向与后方交会解算后要按「接受」才入账";
+            DiagSummary.Text = "! " + ReportBuilder.MissingHint(line);
             DiagSummary.Foreground = WarnBadge;
             return;
         }
 
         var dialog = new SaveFileDialog
         {
-            Title = "导出成果报告",
+            Title = $"导出成果报告（{ReportBuilder.MethodName(line)}）",
             Filter = "网页（单文件）|*.html",
             DefaultExt = ".html",
             AddExtension = true,
-            FileName = SafeFileName(_project.Name) + "_后交前交报告.html",
+            FileName = SafeFileName(_project.Name) + "_" + ReportBuilder.FileTag(line) + ".html",
         };
 
         if (_projectPath is { } projectPath && Path.GetDirectoryName(projectPath) is { Length: > 0 } dir)
@@ -60,21 +72,21 @@ public partial class MainWindow
         }
 
         if (dialog.ShowDialog(this) != true) return;
-        WriteAndOpenReport(dialog.FileName);
+        WriteAndOpenReport(dialog.FileName, line);
     }
 
     /// <summary>生成 → 写字 → 开浏览器。三件事各自可能失败，失败就说到哪一步为止。</summary>
-    private bool WriteAndOpenReport(string path)
+    private bool WriteAndOpenReport(string path, ReportLine line)
     {
         string html;
         try
         {
-            html = ReportBuilder.Build(_project, _reportPoints, DateTime.Now, _projectPath);
+            html = ReportBuilder.Build(_project, line, _reportPoints, DateTime.Now, _projectPath);
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "报告生成失败", MessageBoxButton.OK, MessageBoxImage.Warning);
-            LogSolve("报告", "后交–前交", false, ex.Message);
+            LogSolve("报告", ReportBuilder.MethodName(line), false, ex.Message);
             return false;
         }
 
@@ -86,11 +98,11 @@ public partial class MainWindow
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "报告保存失败", MessageBoxButton.OK, MessageBoxImage.Warning);
-            LogSolve("报告", "后交–前交", false, "保存失败：" + ex.Message);
+            LogSolve("报告", ReportBuilder.MethodName(line), false, "保存失败：" + ex.Message);
             return false;
         }
 
-        LogSolve("报告", "后交–前交", true, $"已生成 {Path.GetFileName(path)}");
+        LogSolve("报告", ReportBuilder.MethodName(line), true, $"已生成 {Path.GetFileName(path)}");
         DiagSummary.Text = "✓ 报告已生成，正在用浏览器打开";
         DiagSummary.Foreground = OkBadge;
 
@@ -132,8 +144,8 @@ public partial class MainWindow
     // ===================== 供离屏渲染工具断言 =====================
 
     /// <summary>报告正文，不写盘也不开浏览器。Snap 用它验"表格里真的有这几节、这几个数"。</summary>
-    internal string BuildReportForTooling() =>
-        ReportBuilder.Build(_project, _reportPoints, DateTime.Now, _projectPath);
+    internal string BuildReportForTooling(ReportLine line) =>
+        ReportBuilder.Build(_project, line, _reportPoints, DateTime.Now, _projectPath);
 
     /// <summary>报告里会有几个交会点。Snap 用它验"交会点确实进了报告"。</summary>
     internal int ReportPointCountForTooling => _reportPoints.Count;

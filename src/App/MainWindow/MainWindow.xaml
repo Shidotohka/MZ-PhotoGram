@@ -70,8 +70,10 @@
                             <MenuItem Header="结果与残差…" InputGestureText="F3" Click="OpenResults_Click"/>
                             <Separator/>
                             <!-- 报告不是一步作业（没有解算、没有可接受的结果），所以不占模块位，
-                                 只在这里：把已入账的成果导成一份 HTML 交给浏览器打印 -->
+                                 只在这里：把已入账的成果导成一份 HTML 交给浏览器打印。
+                                 一条线一份——两套坐标系混在一份文件里，读者分不清哪张表是什么 -->
                             <MenuItem Header="成果报告（后交–前交）…" Click="ExportReport_Click"/>
+                            <MenuItem Header="成果报告（相对–绝对）…" Click="ExportRelativeReport_Click"/>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>

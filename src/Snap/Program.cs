@@ -2263,6 +2263,9 @@ internal static class Program
         // ---- 重开工程：结果本来就在文件里，应该原样回到结果集合（M7.5 第 4 步）----
         ReopenCheck(win);
 
+        // ---- 报告：这条线的成果导出来该有那几节，而且不能串进来另一条线的表 ----
+        ReportCheckOnDemo(win);
+
         Console.WriteLine(win.ResultWindowIsOpen
             ? "[PASS] 解完自动打开结果窗口"
             : "[FAIL] 结果窗口没打开，用户看不到结果");
@@ -4101,6 +4104,71 @@ internal static class Program
         .ToList();
 
     /// <summary>
+    /// 在真工程上验相对–绝对那份报告（**重开之后**）：这时结果只剩工程里的块，
+    /// 报告若还能排出那几张表，说明它读的确实是成果、不是会话里的残留。
+    /// </summary>
+    private static void ReportCheckOnDemo(MainWindow win)
+    {
+        Console.WriteLine("\n成果报告（相对–绝对，真数据）─────────────────────────────");
+
+        var project = win.CurrentProject;
+        var pair = project.Pairs.FirstOrDefault();
+        if (pair?.Absolute is not { } absolute)
+        {
+            Console.WriteLine("[FAIL] 工程里没有绝对定向成果，报告无从验起");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var html = win.BuildReportForTooling(Photogrammetry.App.Report.ReportLine.RelativeAbsolute);
+
+        var sections = html.Split("<section>").Length - 1;
+        Console.WriteLine(sections >= 6
+            ? $"[PASS] 排出了 {sections} 节（内定向 / 相对定向 / 模型交会 / 绝对定向 …）"
+            : $"[FAIL] 只有 {sections} 节");
+        if (sections < 6) Environment.ExitCode = 1;
+
+        foreach (var title in new[] { "内定向", "相对定向", "模型交会", "绝对定向" })
+        {
+            var hit = html.Contains("</span>" + title, StringComparison.Ordinal);
+            Console.WriteLine(hit ? $"[PASS] 有「{title}」这一节" : $"[FAIL] 缺「{title}」这一节");
+            if (!hit) Environment.ExitCode = 1;
+        }
+
+        var crossLine = html.Contains("前方交会", StringComparison.Ordinal);
+        Console.WriteLine(crossLine
+            ? "[FAIL] 相对–绝对的报告里出现了前方交会的表"
+            : "[PASS] 没有串线：这份报告里没有前方交会");
+        if (crossLine) Environment.ExitCode = 1;
+
+        // 七参数是这一段的成果，报告上的 λ 必须就是文件里的那个数
+        var lambda = absolute.Lambda.ToString("0.000000", CultureInfo.InvariantCulture);
+        var lambdaShown = html.Contains(lambda, StringComparison.Ordinal);
+        Console.WriteLine(lambdaShown
+            ? $"[PASS] λ = {lambda} 原样出现在报告里"
+            : $"[FAIL] 报告里找不到 λ = {lambda}");
+        if (!lambdaShown) Environment.ExitCode = 1;
+
+        // 相对定向的五个元素也该在：这是这条线的"定形"那一步
+        var baseline = pair.Relative is { } relative
+            ? relative.Bx.ToString("+0.0000000;-0.0000000", CultureInfo.InvariantCulture)
+            : null;
+        var baselineShown = baseline is not null && html.Contains(baseline, StringComparison.Ordinal);
+        Console.WriteLine(baselineShown
+            ? $"[PASS] 基线 b_x = {baseline} 在报告里"
+            : $"[FAIL] 报告里找不到基线 b_x = {baseline ?? "（没有相对定向块）"}");
+        if (!baselineShown) Environment.ExitCode = 1;
+
+        var unreplaced = html.Contains("{{", StringComparison.Ordinal);
+        Console.WriteLine(unreplaced ? "[FAIL] 还有没填的 {{占位符}}" : "[PASS] 占位符全填上了");
+        if (unreplaced) Environment.ExitCode = 1;
+
+        var path = Path.Combine(Path.GetTempPath(), "pgm-report-demo.html");
+        File.WriteAllText(path, html, new System.Text.UTF8Encoding(false));
+        Console.WriteLine($"[PASS] 已写出 {path}（{html.Length} 字符）");
+    }
+
+    /// <summary>
     /// 成果报告（后交–前交）：模板在不在、五节排出来没有、顺序对不对、数是不是那几个、
     /// 该标红的地方红了没有。**纯数据**——不开窗口、不解算：报告本来就是"把已入账的成果
     /// 换个版式"，它不该有自己的计算。
@@ -4142,7 +4210,8 @@ internal static class Program
         };
 
         var html = Photogrammetry.App.Report.ReportBuilder.Build(
-            project, points, new DateTime(2026, 11, 8, 15, 30, 0), null);
+            project, Photogrammetry.App.Report.ReportLine.BackIntersection, points,
+            new DateTime(2026, 11, 8, 15, 30, 0), null);
 
         // ---- 结构 ----
         var sections = html.Split("<section>").Length - 1;
@@ -4196,7 +4265,8 @@ internal static class Program
 
         // ---- 没有交会点时那一段写「未计算」，不是整节消失 ----
         var empty = Photogrammetry.App.Report.ReportBuilder.Build(
-            project, Array.Empty<Photogrammetry.App.Report.ReportPoint>(),
+            project, Photogrammetry.App.Report.ReportLine.BackIntersection,
+            Array.Empty<Photogrammetry.App.Report.ReportPoint>(),
             new DateTime(2026, 11, 8, 15, 30, 0), null);
         var showsEmpty = empty.Contains("未计算", StringComparison.Ordinal) &&
                          empty.Split("<section>").Length - 1 == 5;
@@ -4209,6 +4279,233 @@ internal static class Program
         var path = outPath ?? Path.Combine(Path.GetTempPath(), "pgm-report.html");
         File.WriteAllText(path, html, new System.Text.UTF8Encoding(false));
         Console.WriteLine($"[PASS] 已写出 {Path.GetFullPath(path)}（{html.Length} 字符）");
+
+        // ================= 相对–绝对 =================
+        Console.WriteLine("\n成果报告（相对–绝对）─────────────────────────────────");
+
+        var relativeHtml = Photogrammetry.App.Report.ReportBuilder.Build(
+            RelativeFixture(), Photogrammetry.App.Report.ReportLine.RelativeAbsolute,
+            Array.Empty<Photogrammetry.App.Report.ReportPoint>(),
+            new DateTime(2026, 11, 8, 15, 30, 0), null);
+
+        var relativeSections = relativeHtml.Split("<section>").Length - 1;
+        Console.WriteLine(relativeSections == 8
+            ? "[PASS] 八节：内定向 / 框标残差 / 相对定向 / 相对定向残差 / 模型交会 / 绝对定向 / 绝对定向精度 / 绝对定向不符值"
+            : $"[FAIL] 节数 {relativeSections}（应为 8）");
+        if (relativeSections != 8) Environment.ExitCode = 1;
+
+        var relativeOrder = new[]
+        {
+            "内定向", "框标残差", "相对定向", "相对定向残差",
+            "模型交会", "绝对定向", "绝对定向精度", "绝对定向不符值",
+        }.Select(title => relativeHtml.IndexOf("</span>" + title, StringComparison.Ordinal)).ToList();
+        var relativeOrdered = relativeOrder.All(i => i >= 0) &&
+                              relativeOrder.Zip(relativeOrder.Skip(1)).All(pair => pair.First < pair.Second);
+        Console.WriteLine(relativeOrdered
+            ? "[PASS] 节的顺序就是作业顺序（内定向 → 相对定向 → 模型交会 → 绝对定向）"
+            : $"[FAIL] 节的顺序不对：[{string.Join(",", relativeOrder)}]");
+        if (!relativeOrdered) Environment.ExitCode = 1;
+
+        // 这条线上不该出现另一条线的表：两套坐标系混在一份文件里正是要避免的事
+        var crossLine = relativeHtml.Contains("前方交会", StringComparison.Ordinal) ||
+                        relativeHtml.Contains("后方交会", StringComparison.Ordinal);
+        Console.WriteLine(crossLine
+            ? "[FAIL] 相对–绝对的报告里出现了后交–前交的表"
+            : "[PASS] 没有串线：这份报告里没有后方交会/前方交会");
+        if (crossLine) Environment.ExitCode = 1;
+
+        var relativeExpected = new (string Needle, string What)[]
+        {
+            ("DSC001 / DSC002", "像对号"),
+            ("+0.0347096", "基线 b_x（单位方向）"),
+            ("0.0126", "q 中误差"),
+            ("1.000450", "尺度 λ"),
+            ("+0.2500", "绝对定向 φ"),
+            ("0.1500", "σ₀"),
+            ("12 对", "同名点计数"),
+        };
+
+        foreach (var (needle, what) in relativeExpected)
+        {
+            var hit = relativeHtml.Contains(needle, StringComparison.Ordinal);
+            Console.WriteLine(hit ? $"[PASS] 报告里有{what} {needle}" : $"[FAIL] 报告里找不到{what}「{needle}」");
+            if (!hit) Environment.ExitCode = 1;
+        }
+
+        var relativeMarks = relativeHtml.Split("class=\"n w\"").Length - 1;
+        Console.WriteLine(relativeMarks >= 6
+            ? $"[PASS] 超出判据的 {relativeMarks} 处标红（剔除的同名点、交会角、σ₀ 折像元、不符值、σ₃/σ₁）"
+            : $"[FAIL] 只标红了 {relativeMarks} 处（至少该有 6 处）");
+        if (relativeMarks < 6) Environment.ExitCode = 1;
+
+        var mirrorHinted = relativeHtml.Contains("数据镜像", StringComparison.Ordinal);
+        Console.WriteLine(mirrorHinted
+            ? "[PASS] 镜像嫌疑写进了脚注（这么要紧的事不能只在窗口里）"
+            : "[FAIL] 镜像嫌疑没有出现在报告里");
+        if (!mirrorHinted) Environment.ExitCode = 1;
+
+        var relativeUnreplaced = relativeHtml.Contains("{{", StringComparison.Ordinal);
+        Console.WriteLine(relativeUnreplaced ? "[FAIL] 还有没填的 {{占位符}}" : "[PASS] 占位符全填上了");
+        if (relativeUnreplaced) Environment.ExitCode = 1;
+
+        var relativePath = outPath is null
+            ? Path.Combine(Path.GetTempPath(), "pgm-report-relative.html")
+            : Path.Combine(Path.GetDirectoryName(outPath) ?? ".",
+                Path.GetFileNameWithoutExtension(outPath) + "_相对绝对.html");
+        File.WriteAllText(relativePath, relativeHtml, new System.Text.UTF8Encoding(false));
+        Console.WriteLine($"[PASS] 已写出 {Path.GetFullPath(relativePath)}（{relativeHtml.Length} 字符）");
+    }
+
+    /// <summary>
+    /// 相对–绝对那条线的自检工程：两片（做内定向）、12 对同名点（1 对被剔除）、
+    /// 四个控制点（1 个检查点）、一对像对的相对定向 + 模型交会 + 绝对定向三块成果。
+    ///
+    /// <para>故意做坏的几处：一个 q 大到被剔除、交会角 9°、σ₀ 折成 15 px、一个点不符值 2.7σ₀、
+    /// 扁平度 4e-4，外加一处镜像嫌疑——报告该把这些都摆出来。</para>
+    /// </summary>
+    private static Project RelativeFixture()
+    {
+        var project = new Project { Name = "报告自检（相对–绝对）" };
+
+        var left = new ImageItem { Id = "DSC001", Width = 5616, Height = 3744 };
+        var right = new ImageItem { Id = "DSC002", Width = 5616, Height = 3744 };
+
+        foreach (var image in new[] { left, right })
+        {
+            image.Interior = new InteriorOrientation
+            {
+                FocalLength = 153.24, X0 = 0.012, Y0 = -0.009, PixelSizeMm = 0.00641,
+            };
+            image.Affine = new AffineInterior
+            {
+                A0 = 0.012, A1 = 0.00641, A2 = 0.0, B0 = -0.009, B1 = 0.0, B2 = -0.00641,
+            };
+            var quality = new InteriorQuality
+            {
+                SxMm = 0.00641, SyMm = 0.00641, PixelSizeMm = 0.00641,
+                X0Mm = 0.012, Y0Mm = -0.009, Sigma0Mm = 0.0091,
+                MaxAbsResidualMm = 0.012, Redundancy = 2,
+            };
+            quality.Residuals.Add(new FiducialResidualValue(1, 0.0011, -0.0007));
+            quality.Residuals.Add(new FiducialResidualValue(2, -0.0014, 0.0009));
+            quality.Residuals.Add(new FiducialResidualValue(3, 0.0006, 0.0012));
+            quality.Residuals.Add(new FiducialResidualValue(4, -0.0009, -0.0011));
+            image.InteriorQuality = quality;
+            image.InteriorTimeUtc = DateTimeOffset.UtcNow;
+            project.Images.Add(image);
+        }
+
+        // 12 对同名点：最后 1 对 q 大到被剔除
+        var heavy = 11;
+        for (var k = 0; k < 12; k++)
+        {
+            var tie = new TiePoint
+            {
+                Id = $"T{k + 1:00}",
+                Q = k == heavy ? 0.085 : 0.004 + 0.001 * k,
+                Rejected = k == heavy,
+            };
+            project.TiePoints.Add(tie);
+
+            left.Points.Add(new ImagePoint
+            {
+                Id = $"L{k + 1:00}", ImageId = left.Id, PixelX = 1800 + 90 * k, PixelY = 1900,
+                BoundTiePointId = tie.Id,
+            });
+            right.Points.Add(new ImagePoint
+            {
+                Id = $"R{k + 1:00}", ImageId = right.Id, PixelX = 1900 + 90 * k, PixelY = 1880,
+                BoundTiePointId = tie.Id,
+            });
+        }
+
+        var pair = new StereoPair { Id = "DSC001-DSC002", LeftImageId = left.Id, RightImageId = right.Id };
+        pair.Relative = new RelativeOrientation
+        {
+            ReferenceImageId = left.Id,
+            Bx = 0.0347096, By = 0.9993781, Bz = -0.0062142,
+            Phi2 = 0.012345, Omega2 = -0.006789, Kappa2 = 0.045678,
+            Gauge = 1, Iterations = 4, UsedCount = 11, RejectedCount = 1,
+            FocalLength = 153.24, Sigma0Mm = 0.0148, RmsQ = 0.0126, MaxQ = 0.085,
+            Condition = 2147.3,
+        };
+
+        var gcps = new (string Id, double X, double Y, double Z, GcpType Type)[]
+        {
+            ("K01", 1000.0, 2000.0, 88.0, GcpType.Planimetric),
+            ("K02", 1050.0, 2000.0, 89.0, GcpType.Planimetric),
+            ("K03", 1050.0, 2050.0, 90.0, GcpType.Planimetric),
+            ("K04", 1000.0, 2050.0, 91.0, GcpType.CheckPoint),
+        };
+
+        var model = new ModelSolution { TimeUtc = DateTimeOffset.UtcNow };
+        for (var k = 0; k < gcps.Length; k++)
+        {
+            var g = gcps[k];
+            project.Gcps.Add(new Gcp { Id = g.Id, X = g.X, Y = g.Y, Z = g.Z, Type = g.Type });
+
+            // 四个控制点在两片上都刺过点：模型交会要"两片各一个"
+            left.Points.Add(new ImagePoint
+            {
+                Id = $"LK{k + 1}", ImageId = left.Id, PixelX = 2000 + 40 * k, PixelY = 1800,
+                BoundGcpId = g.Id,
+            });
+            right.Points.Add(new ImagePoint
+            {
+                Id = $"RK{k + 1}", ImageId = right.Id, PixelX = 2080 + 40 * k, PixelY = 1790,
+                BoundGcpId = g.Id,
+            });
+
+            model.Points.Add(new ModelSolutionPoint
+            {
+                GcpId = g.Id,
+                X = 0.10 + 0.02 * k,
+                Y = 0.05 + 0.01 * k,
+                Z = 0.008 + 0.001 * k,
+                // 最后一个点交会角 9°：深度不可靠，该标红
+                ConvergenceAngleDeg = k == gcps.Length - 1 ? 9.0 : 28.0 + k,
+            });
+        }
+
+        pair.Model = model;
+
+        var absolute = new AbsoluteSolution
+        {
+            Lambda = 1.000450,
+            Phi = 0.25, Omega = -0.12, Kappa = 6.75,
+            Dx = 512345.678, Dy = 3456789.012, Dz = 88.5,
+            GroundOrder = GroundAxisOrder.EastNorth,
+            Sigma0 = 0.15,
+            Rms3D = 0.21,
+            MaxAbsResidual = 0.42,
+            Redundancy = 5,
+            UsedCount = 3,
+            CheckCount = 1,
+            Flatness = 4e-4,
+            MirrorSuspected = true,
+            CheckPlanimetricMax = 0.081,
+            CheckHeightMax = 0.124,
+            Gsd = 0.01,
+            HbRatio = 2.4,
+        };
+
+        double[] dxy = { 0.010, 0.015, 0.300, 0.060 };
+        double[] dz = { 0.012, -0.020, -0.280, -0.070 };
+        for (var k = 0; k < gcps.Length; k++)
+        {
+            absolute.Points.Add(new AbsoluteSolutionPoint
+            {
+                GcpId = gcps[k].Id,
+                Dxy = dxy[k],
+                Dz = dz[k],
+                Check = gcps[k].Type == GcpType.CheckPoint,
+            });
+        }
+
+        pair.Absolute = absolute;
+        project.Pairs.Add(pair);
+
+        return project;
     }
 
     /// <summary>
