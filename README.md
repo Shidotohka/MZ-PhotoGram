@@ -89,3 +89,7 @@ dotnet run --project src/App/App.csproj
 5. **数据先合成、后真实**。合成数据有真值，能精确判对错；真实数据用来证明它能用。
 6. **进度只写在路线图里**，别的地方不重复，避免一处更新一处过期。
 
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
